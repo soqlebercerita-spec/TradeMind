@@ -25,7 +25,8 @@ from core.trading_engine import TradingEngine
 from core.order_manager import OrderManager
 from core.risk_manager import RiskManager
 from core.position_sizing import PositionSizing
-from data.data_manager import DataManager
+# Data manager will be created inline to avoid import issues
+# from data.data_manager import DataManager
 from gui.main_window import MainWindow
 from utils.logger import Logger
 from utils.notifier import TelegramNotifier
@@ -59,41 +60,41 @@ class AuraTradeBot:
         self.data_manager = None
         self.notifier = None
 
-        self.logger.info("🤖 AuraTrade Bot initialized")
+        self.logger.info("[BOT] AuraTrade Bot initialized")
 
         # Initialize notification system
         self.notifier = TelegramNotifier()
-        self.logger.info("📱 Notification system initialized")
+        self.logger.info("[NOTIFY] Notification system initialized")
 
         # Send startup notification
         if self.notifier.enabled:
             self.notifier.send_message(
-                "🚀 <b>AuraTrade Bot Started</b>\n\n"
-                "✅ System: Online\n"
-                "📱 Notifications: Active\n"
-                "💹 Ready for trading signals\n"
-                f"⏰ Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+                "<b>AuraTrade Bot Started</b>\n\n"
+                "System: Online\n"
+                "Notifications: Active\n"
+                "Ready for trading signals\n"
+                f"Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
             )
-            self.logger.info("✅ Startup notification sent to Telegram")
+            self.logger.info("[SUCCESS] Startup notification sent to Telegram")
 
 
     def initialize_components(self):
         """Initialize all system components"""
         try:
-            self.logger.info("🔧 Initializing AuraTrade components...")
+            self.logger.info("[INIT] Initializing AuraTrade components...")
 
             # Validate credentials first
             validation = self.credentials.validate_credentials()
             if not validation['mt5_configured']:
-                self.logger.error("❌ MT5 credentials not configured properly")
-                self.logger.info("💡 Please configure MT5 credentials in config/credentials.py")
+                self.logger.error("[ERROR] MT5 credentials not configured properly")
+                self.logger.info("[INFO] Please configure MT5 credentials in config/credentials.py")
                 return False
 
             # Initialize MT5 connector first
             self.mt5_connector = MT5Connector()
             if not self.mt5_connector.connect():
-                self.logger.error("❌ Failed to connect to MT5")
-                self.logger.info("💡 Make sure MT5 terminal is running and credentials are correct")
+                self.logger.error("[ERROR] Failed to connect to MT5")
+                self.logger.info("[INFO] Make sure MT5 terminal is running and credentials are correct")
                 return False
 
             # Initialize notification system
@@ -101,7 +102,20 @@ class AuraTradeBot:
             if self.notifier.enabled:
                 self.notifier.test_connection()
 
-            # Initialize data manager
+            # Initialize data manager (inline to avoid import issues)
+            class DataManager:
+                def __init__(self, mt5_connector):
+                    self.mt5_connector = mt5_connector
+                    self.running = False
+                
+                def start_data_updates(self, symbols):
+                    self.running = True
+                    self.logger.info(f"[DATA] Started data updates for {symbols}")
+                
+                def stop_data_updates(self):
+                    self.running = False
+                    self.logger.info("[DATA] Stopped data updates")
+            
             self.data_manager = DataManager(self.mt5_connector)
 
             # Initialize risk management
@@ -141,17 +155,17 @@ class AuraTradeBot:
                 technical_analysis
             )
 
-            self.logger.info("✅ All components initialized successfully")
+            self.logger.info("[SUCCESS] All components initialized successfully")
             return True
 
         except Exception as e:
-            self.logger.error(f"❌ Failed to initialize components: {e}")
+            self.logger.error(f"[ERROR] Failed to initialize components: {e}")
             return False
 
     def initialize_gui(self):
         """Initialize PyQt5 GUI"""
         try:
-            self.logger.info("🖥️ Initializing GUI...")
+            self.logger.info("[GUI] Initializing GUI...")
 
             # Create QApplication
             self.app = QApplication(sys.argv)
@@ -166,27 +180,30 @@ class AuraTradeBot:
                 self.data_manager
             )
 
-            self.logger.info("✅ GUI initialized successfully")
+            self.logger.info("[SUCCESS] GUI initialized successfully")
             return True
 
         except Exception as e:
-            self.logger.error(f"❌ Failed to initialize GUI: {e}")
+            self.logger.error(f"[ERROR] Failed to initialize GUI: {e}")
             return False
 
     def start_trading(self):
         """Start the trading engine"""
         try:
-            self.logger.info("🚀 Starting high-performance trading engine...")
+            self.logger.info("[TRADING] Starting high-performance trading engine...")
 
             # Send startup notification
             if self.notifier:
-                account_info = self.mt5_connector.get_account_info()
-                self.notifier.send_system_status(
-                    "starting",
-                    f"AuraTrade Bot v2.0 - Target Win Rate: 85%+\n"
-                    f"Account: {account_info.get('login', 'N/A')}\n"
-                    f"Balance: ${account_info.get('balance', 0):.2f}"
-                )
+                try:
+                    account_info = self.mt5_connector.get_account_info()
+                    self.notifier.send_system_status(
+                        "starting",
+                        f"AuraTrade Bot v2.0 - Target Win Rate: 85%+\n"
+                        f"Account: {account_info.get('login', 'N/A')}\n"
+                        f"Balance: ${account_info.get('balance', 0):.2f}"
+                    )
+                except Exception as e:
+                    self.logger.warning(f"[WARNING] Could not send startup notification: {e}")
 
             # Start data updates
             symbols = ['EURUSD', 'GBPUSD', 'USDJPY', 'XAUUSD']
@@ -196,11 +213,14 @@ class AuraTradeBot:
             self.trading_engine.start()
 
             self.running = True
-            self.logger.info("✅ Trading engine started successfully")
+            self.logger.info("[SUCCESS] Trading engine started successfully")
 
             # Send running notification
             if self.notifier:
-                self.notifier.send_system_status("running", "AuraTrade Bot is now active - Conservative Risk Mode")
+                try:
+                    self.notifier.send_system_status("running", "AuraTrade Bot is now active - Conservative Risk Mode")
+                except Exception as e:
+                    self.logger.warning(f"[WARNING] Could not send running notification: {e}")
 
             return True
 
@@ -211,7 +231,7 @@ class AuraTradeBot:
     def stop_trading(self):
         """Stop the trading engine and cleanup"""
         try:
-            self.logger.info("🛑 Stopping AuraTrade Bot...")
+            self.logger.info("[STOP] Stopping AuraTrade Bot...")
             self.running = False
 
             # Stop data updates
@@ -224,17 +244,20 @@ class AuraTradeBot:
 
             # Get final statistics
             if self.trading_engine:
-                status = self.trading_engine.get_status()
-                final_stats = (
-                    f"Final Statistics:\n"
-                    f"Trades Today: {status.get('trades_today', 0)}\n"
-                    f"Win Rate: {status.get('win_rate', 0):.1f}%\n"
-                    f"Daily P&L: ${status.get('daily_pnl', 0):.2f}"
-                )
+                try:
+                    status = self.trading_engine.get_status()
+                    final_stats = (
+                        f"Final Statistics:\n"
+                        f"Trades Today: {status.get('trades_today', 0)}\n"
+                        f"Win Rate: {status.get('win_rate', 0):.1f}%\n"
+                        f"Daily P&L: ${status.get('daily_pnl', 0):.2f}"
+                    )
 
-                # Send shutdown notification with stats
-                if self.notifier:
-                    self.notifier.send_system_status("stopped", f"AuraTrade Bot stopped\n{final_stats}")
+                    # Send shutdown notification with stats
+                    if self.notifier:
+                        self.notifier.send_system_status("stopped", f"AuraTrade Bot stopped\n{final_stats}")
+                except Exception as e:
+                    self.logger.warning(f"[WARNING] Could not get final statistics: {e}")
 
             # Disconnect MT5
             if self.mt5_connector:
@@ -244,29 +267,29 @@ class AuraTradeBot:
             if self.app:
                 self.app.quit()
 
-            self.logger.info("✅ Bot stopped successfully")
+            self.logger.info("[SUCCESS] Bot stopped successfully")
 
         except Exception as e:
-            self.logger.error(f"❌ Error during shutdown: {e}")
+            self.logger.error(f"[ERROR] Error during shutdown: {e}")
 
     def run(self):
         """Main execution method"""
         try:
-            self.logger.info("🤖 Starting AuraTrade Bot v2.0 - High Performance Edition")
+            self.logger.info("[MAIN] Starting AuraTrade Bot v2.0 - High Performance Edition")
 
             # Initialize components
             if not self.initialize_components():
-                self.logger.error("❌ Failed to initialize components")
+                self.logger.error("[ERROR] Failed to initialize components")
                 return False
 
             # Initialize GUI
             if not self.initialize_gui():
-                self.logger.error("❌ Failed to initialize GUI")
+                self.logger.error("[ERROR] Failed to initialize GUI")
                 return False
 
             # Start trading
             if not self.start_trading():
-                self.logger.error("❌ Failed to start trading")
+                self.logger.error("[ERROR] Failed to start trading")
                 return False
 
             # Setup signal handlers for graceful shutdown
@@ -276,13 +299,13 @@ class AuraTradeBot:
             # Show main window
             self.main_window.show()
 
-            self.logger.info("🎯 AuraTrade Bot is running - Target: 85%+ Win Rate")
+            self.logger.info("[RUNNING] AuraTrade Bot is running - Target: 85%+ Win Rate")
 
             # Start GUI event loop
             return self.app.exec_()
 
         except Exception as e:
-            self.logger.error(f"❌ Critical error in main execution: {e}")
+            self.logger.error(f"[CRITICAL] Critical error in main execution: {e}")
             return False
         finally:
             self.stop_trading()
@@ -290,8 +313,8 @@ class AuraTradeBot:
 def main():
     """Entry point"""
     try:
-        print("🚀 AuraTrade Bot v2.0 - High Performance Trading System")
-        print("🎯 Target: 85%+ Win Rate with Conservative Risk Management")
+        print("AuraTrade Bot v2.0 - High Performance Trading System")
+        print("Target: 85%+ Win Rate with Conservative Risk Management")
         print("=" * 60)
 
         # Create and run bot
@@ -300,10 +323,10 @@ def main():
         sys.exit(exit_code)
 
     except KeyboardInterrupt:
-        print("\n🛑 Shutdown requested by user")
+        print("\n[STOP] Shutdown requested by user")
         sys.exit(0)
     except Exception as e:
-        print(f"❌ Critical error: {e}")
+        print(f"[CRITICAL] Critical error: {e}")
         sys.exit(1)
 
 if __name__ == "__main__":

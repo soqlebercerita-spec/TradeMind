@@ -75,19 +75,17 @@ class Credentials:
     def validate_credentials(self) -> dict:
         """Validate all credentials"""
         validation = {
-            'telegram': False,
-            'mt5': False,
-            'api_keys': False
+            'telegram_configured': False,
+            'mt5_configured': True,  # Auto-detect mode
+            'api_keys_configured': True
         }
         
         # Validate Telegram
         if self.TELEGRAM_BOT_TOKEN and self.TELEGRAM_CHAT_ID:
-            validation['telegram'] = True
-        
-        # MT5 will be validated during connection
-        validation['mt5'] = True  # Auto-detect mode
-        
-        # API keys are optional
-        validation['api_keys'] = True
+            validation['telegram_configured'] = True
         
         return validation
+    
+    def is_telegram_configured(self) -> bool:
+        """Check if Telegram is properly configured"""
+        return bool(self.TELEGRAM_BOT_TOKEN and self.TELEGRAM_CHAT_ID and self.TELEGRAM_ENABLED)
