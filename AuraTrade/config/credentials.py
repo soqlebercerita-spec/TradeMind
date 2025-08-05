@@ -1,95 +1,61 @@
-
 """
-Secure credentials management for AuraTrade Bot
+Credentials configuration for AuraTrade Bot
+Store all sensitive data here
 """
-
-import os
-from typing import Dict, Any
-from utils.logger import Logger
 
 class Credentials:
-    """Secure credentials management"""
-    
+    """Centralized credentials management"""
+
     def __init__(self):
-        self.logger = Logger().get_logger()
-        
-        # MT5 Credentials - CONFIGURE THESE FOR YOUR ACCOUNT
-        self.MT5_LOGIN = int(os.getenv('MT5_LOGIN', '0'))  # Your MT5 account number
-        self.MT5_PASSWORD = os.getenv('MT5_PASSWORD', '')  # Your MT5 password
-        self.MT5_SERVER = os.getenv('MT5_SERVER', '')      # Your MT5 server
-        
-        # Telegram Bot Credentials (Optional)
-        self.TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN', '')
-        self.TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID', '')
-        
-        # Validate on initialization
-        self.validate_credentials()
-    
-    def validate_credentials(self) -> Dict[str, Any]:
+        # MT5 Configuration (Mock for Replit)
+        self.MT5_LOGIN = 12345678
+        self.MT5_PASSWORD = "demo_password"
+        self.MT5_SERVER = "Demo-Server"
+
+        # Telegram Configuration
+        self.TELEGRAM_ENABLED = True
+        self.TELEGRAM_BOT_TOKEN = "YOUR_BOT_TOKEN_HERE"  # Replace with actual token
+        self.TELEGRAM_CHAT_ID = "YOUR_CHAT_ID_HERE"     # Replace with actual chat ID
+
+        # Trading Configuration
+        self.DEMO_MODE = True  # Always True in Replit
+        self.MAX_RISK_PERCENT = 2.0
+        self.MAX_DAILY_LOSS = 500.0
+        self.DEFAULT_LOT_SIZE = 0.01
+
+        # API Keys (if needed)
+        self.NEWS_API_KEY = ""
+        self.ECONOMIC_CALENDAR_API = ""
+
+    def validate_credentials(self) -> dict:
         """Validate all credentials"""
-        validation_result = {
-            'mt5_configured': False,
-            'telegram_configured': False,
-            'warnings': [],
+        validation = {
+            'mt5_configured': bool(self.MT5_LOGIN and self.MT5_PASSWORD and self.MT5_SERVER),
+            'telegram_configured': bool(self.TELEGRAM_BOT_TOKEN and self.TELEGRAM_CHAT_ID),
+            'demo_mode': self.DEMO_MODE,
             'errors': []
         }
-        
-        try:
-            # Check MT5 credentials
-            if self.MT5_LOGIN and self.MT5_LOGIN != 0:
-                if self.MT5_PASSWORD:
-                    if self.MT5_SERVER:
-                        validation_result['mt5_configured'] = True
-                        self.logger.info("MT5 credentials configured")
-                    else:
-                        validation_result['errors'].append("MT5_SERVER not configured")
-                else:
-                    validation_result['errors'].append("MT5_PASSWORD not configured")
-            else:
-                validation_result['errors'].append("MT5_LOGIN not configured")
-            
-            # Check Telegram credentials (optional)
-            if self.TELEGRAM_BOT_TOKEN and self.TELEGRAM_CHAT_ID:
-                validation_result['telegram_configured'] = True
-                self.logger.info("Telegram credentials configured")
-            else:
-                validation_result['warnings'].append("Telegram credentials not configured - notifications disabled")
-            
-            # Log results
-            if validation_result['errors']:
-                for error in validation_result['errors']:
-                    self.logger.error(f"Credential error: {error}")
-            
-            if validation_result['warnings']:
-                for warning in validation_result['warnings']:
-                    self.logger.warning(f"Credential warning: {warning}")
-            
-            return validation_result
-            
-        except Exception as e:
-            self.logger.error(f"Error validating credentials: {e}")
-            validation_result['errors'].append(f"Validation error: {e}")
-            return validation_result
-    
-    def get_mt5_credentials(self) -> Dict[str, Any]:
-        """Get MT5 credentials"""
+
+        if not validation['mt5_configured']:
+            validation['errors'].append("MT5 credentials incomplete")
+
+        if self.TELEGRAM_ENABLED and not validation['telegram_configured']:
+            validation['errors'].append("Telegram credentials incomplete")
+
+        return validation
+
+    def get_mt5_config(self) -> dict:
+        """Get MT5 configuration"""
         return {
             'login': self.MT5_LOGIN,
             'password': self.MT5_PASSWORD,
             'server': self.MT5_SERVER
         }
-    
-    def get_telegram_credentials(self) -> Dict[str, str]:
-        """Get Telegram credentials"""
+
+    def get_telegram_config(self) -> dict:
+        """Get Telegram configuration"""
         return {
+            'enabled': self.TELEGRAM_ENABLED,
             'bot_token': self.TELEGRAM_BOT_TOKEN,
             'chat_id': self.TELEGRAM_CHAT_ID
         }
-    
-    def is_mt5_configured(self) -> bool:
-        """Check if MT5 is properly configured"""
-        return bool(self.MT5_LOGIN and self.MT5_PASSWORD and self.MT5_SERVER)
-    
-    def is_telegram_configured(self) -> bool:
-        """Check if Telegram is properly configured"""
-        return bool(self.TELEGRAM_BOT_TOKEN and self.TELEGRAM_CHAT_ID)
