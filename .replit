@@ -8,7 +8,7 @@ packages = ["glibcLocales"]
 run = ["sh", "-c", "cd AuraTrade && python bot.py"]
 
 [workflows]
-runButton = "Run AuraTrade Bot"
+runButton = "Install and Run AuraTrade"
 
 [[workflows.workflow]]
 name = "Run TradeMind Bot"
@@ -36,3 +36,16 @@ mode = "sequential"
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "cd AuraTrade && pip3 install -r ../requirements.txt"
+
+[[workflows.workflow]]
+name = "Install and Run AuraTrade"
+author = 46024361
+mode = "sequential"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pip install -r requirements.txt"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "cd AuraTrade && python bot.py"

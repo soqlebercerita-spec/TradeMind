@@ -17,10 +17,13 @@ from utils.logger import Logger
 from utils.notifier import TelegramNotifier
 
 class TradingEngine:
-    """High-performance trading engine with multi-strategy support"""
+    """High-performance trading engine with 75%+ win rate target"""
 
-    def __init__(self, mt5_connector, order_manager, risk_manager, position_sizing,
-                 data_manager, ml_engine, notifier, strategies, technical_analysis):
+    def __init__(self, mt5_connector: MT5Connector, order_manager: OrderManager,
+                 risk_manager: RiskManager, position_sizing: PositionSizing,
+                 data_manager: DataManager, ml_engine: Any, notifier: TelegramNotifier,
+                 strategies: Dict[str, Any], technical_analysis: Any):
+
         self.logger = Logger().get_logger()
         self.mt5_connector = mt5_connector
         self.order_manager = order_manager
@@ -35,378 +38,317 @@ class TradingEngine:
         # Engine state
         self.running = False
         self.trading_thread = None
-        self.analysis_thread = None
+        self.symbols = ['EURUSD', 'GBPUSD', 'USDJPY', 'XAUUSD']
+        self.timeframes = ['M1', 'M5', 'M15', 'H1']
 
         # Performance tracking
         self.trades_today = 0
-        self.wins = 0
-        self.losses = 0
+        self.wins_today = 0
+        self.losses_today = 0
         self.daily_pnl = 0.0
-        self.start_balance = 0.0
+        self.start_time = datetime.now()
 
-        # Configuration
-        self.symbols = ['EURUSD', 'GBPUSD', 'USDJPY', 'XAUUSD']
-        self.check_interval = 1.0  # seconds
-        self.max_concurrent_trades = 5
-        self.min_confidence = 70.0
+        # Strategy settings
+        self.strategy_weights = {
+            'hft': 0.3,
+            'scalping': 0.4,
+            'pattern': 0.3
+        }
 
-        self.logger.info("Trading Engine initialized")
+        self.logger.info("TradingEngine initialized with target 75%+ win rate")
 
-    def start(self):
+    def start(self) -> bool:
         """Start the trading engine"""
         try:
             if self.running:
                 self.logger.warning("Trading engine already running")
-                return
+                return False
 
             self.logger.info("Starting high-performance trading engine...")
-            self.running = True
 
-            # Record start balance
-            account_info = self.mt5_connector.get_account_info()
-            self.start_balance = account_info.get('balance', 0.0)
+            # Validate all components
+            if not self._validate_components():
+                return False
+
+            # Initialize strategies
+            self._initialize_strategies()
 
             # Start trading thread
+            self.running = True
             self.trading_thread = threading.Thread(target=self._trading_loop, daemon=True)
             self.trading_thread.start()
 
-            # Start analysis thread
-            self.analysis_thread = threading.Thread(target=self._analysis_loop, daemon=True)
-            self.analysis_thread.start()
-
             self.logger.info("Trading engine started successfully")
+            return True
 
         except Exception as e:
-            self.logger.error(f"Failed to start trading engine: {e}")
-            self.running = False
+            self.logger.error(f"Error starting trading engine: {e}")
+            return False
 
-    def stop(self):
+    def stop(self) -> None:
         """Stop the trading engine"""
         try:
             self.logger.info("Stopping trading engine...")
             self.running = False
 
-            # Wait for threads to complete
             if self.trading_thread and self.trading_thread.is_alive():
-                self.trading_thread.join(timeout=5.0)
+                self.trading_thread.join(timeout=5)
 
-            if self.analysis_thread and self.analysis_thread.is_alive():
-                self.analysis_thread.join(timeout=5.0)
+            # Close all positions if needed
+            self._emergency_close_all()
 
             self.logger.info("Trading engine stopped")
 
         except Exception as e:
             self.logger.error(f"Error stopping trading engine: {e}")
 
-    def _trading_loop(self):
+    def _trading_loop(self) -> None:
         """Main trading loop"""
         self.logger.info("Trading loop started")
 
         while self.running:
             try:
-                # Check MT5 connection
-                if not self.mt5_connector.ensure_connection():
-                    self.logger.warning("MT5 connection lost, retrying...")
-                    time.sleep(10)
-                    continue
+                # Check if trading should be stopped due to risk
+                if self.risk_manager.should_stop_trading():
+                    self.logger.warning("Trading stopped by risk manager")
+                    break
 
-                # Check risk limits
-                if not self.risk_manager.check_global_risk():
-                    self.logger.warning("Global risk limits exceeded, pausing trading")
-                    time.sleep(60)
-                    continue
+                # Update market data
+                self._update_market_data()
 
                 # Process each symbol
                 for symbol in self.symbols:
                     if not self.running:
                         break
 
-                    try:
-                        self._process_symbol(symbol)
-                    except Exception as e:
-                        self.logger.error(f"Error processing {symbol}: {e}")
+                    self._process_symbol(symbol)
 
-                # Check existing positions
-                self._manage_positions()
+                # Update trailing stops
+                self.order_manager.update_trailing_stops()
 
                 # Update performance metrics
                 self._update_performance()
 
-                time.sleep(self.check_interval)
+                # Sleep before next iteration
+                time.sleep(1)
 
             except Exception as e:
                 self.logger.error(f"Error in trading loop: {e}")
-                time.sleep(5)
+                time.sleep(5)  # Wait before retry
 
         self.logger.info("Trading loop ended")
 
-    def _analysis_loop(self):
-        """Analysis and signal generation loop"""
-        self.logger.info("Analysis loop started")
+    def _update_market_data(self) -> None:
+        """Update market data for all symbols"""
+        try:
+            for symbol in self.symbols:
+                for timeframe in self.timeframes:
+                    # This would trigger data manager updates
+                    pass
 
-        while self.running:
-            try:
-                # Update market data
-                for symbol in self.symbols:
+        except Exception as e:
+            self.logger.error(f"Error updating market data: {e}")
+
+    def _process_symbol(self, symbol: str) -> None:
+        """Process trading signals for a symbol"""
+        try:
+            # Get latest data
+            data = self.data_manager.get_latest_data(symbol, 'M5', 100)
+            if data is None or data.empty:
+                return
+
+            # Check each strategy
+            for strategy_name, strategy in self.strategies.items():
+                try:
                     if not self.running:
                         break
 
-                    # Get latest data
-                    df = self.mt5_connector.get_rates(symbol, 'M1', 100)
-                    if df is not None and len(df) > 0:
-                        self.data_manager.update_symbol_data(symbol, df)
+                    # Get strategy signal
+                    signal = self._get_strategy_signal(strategy, symbol, data)
 
-                time.sleep(30)  # Update every 30 seconds
+                    if signal and signal['action'] != 'hold':
+                        # Validate with risk manager
+                        volume = self.position_sizing.calculate_position_size(
+                            symbol, signal.get('confidence', 0.5)
+                        )
 
-            except Exception as e:
-                self.logger.error(f"Error in analysis loop: {e}")
-                time.sleep(30)
+                        if volume > 0 and self.risk_manager.validate_order(symbol, volume):
+                            # Execute trade
+                            self._execute_trade(symbol, signal, volume, strategy_name)
 
-        self.logger.info("Analysis loop ended")
-
-    def _process_symbol(self, symbol: str):
-        """Process trading signals for a symbol"""
-        try:
-            # Get market data
-            df = self.data_manager.get_symbol_data(symbol)
-            if df is None or len(df) < 50:
-                return
-
-            # Get symbol info
-            symbol_info = self.mt5_connector.get_symbol_info(symbol)
-            if symbol_info is None:
-                return
-
-            # Check market conditions
-            if not self._check_market_conditions(symbol_info):
-                return
-
-            # Check position limits
-            current_positions = len([p for p in self.mt5_connector.get_positions() 
-                                   if p['symbol'] == symbol])
-            if current_positions >= 2:  # Max 2 positions per symbol
-                return
-
-            # Generate signals from all strategies
-            signals = []
-
-            for strategy_name, strategy in self.strategies.items():
-                try:
-                    signal = strategy.generate_signal(df, symbol_info)
-                    if signal and signal.get('confidence', 0) >= self.min_confidence:
-                        signal['strategy'] = strategy_name
-                        signals.append(signal)
                 except Exception as e:
-                    self.logger.error(f"Error in {strategy_name} strategy: {e}")
-
-            # Process signals
-            if signals:
-                best_signal = max(signals, key=lambda x: x.get('confidence', 0))
-                self._execute_signal(symbol, best_signal)
+                    self.logger.error(f"Error processing strategy {strategy_name}: {e}")
 
         except Exception as e:
             self.logger.error(f"Error processing symbol {symbol}: {e}")
 
-    def _check_market_conditions(self, symbol_info: Dict[str, Any]) -> bool:
-        """Check if market conditions are suitable for trading"""
+    def _get_strategy_signal(self, strategy: Any, symbol: str, data: pd.DataFrame) -> Optional[Dict[str, Any]]:
+        """Get trading signal from strategy"""
         try:
-            # Check spread
-            spread_pips = symbol_info['spread'] * symbol_info['point'] * 10
-            if spread_pips > 3.0:
-                return False
-
-            # Check trading hours (avoid low liquidity periods)
-            current_hour = datetime.now().hour
-            if current_hour < 8 or current_hour > 17:
-                return False
-
-            # Check volatility
-            if symbol_info.get('volume_high', 0) == 0:
-                return False
-
-            return True
-
+            if hasattr(strategy, 'analyze'):
+                return strategy.analyze(symbol, data)
+            return None
         except Exception as e:
-            self.logger.error(f"Error checking market conditions: {e}")
-            return False
+            self.logger.error(f"Error getting strategy signal: {e}")
+            return None
 
-    def _execute_signal(self, symbol: str, signal: Dict[str, Any]):
-        """Execute trading signal"""
+    def _execute_trade(self, symbol: str, signal: Dict[str, Any], volume: float, strategy: str) -> None:
+        """Execute trade based on signal"""
         try:
-            # Check total positions
-            total_positions = len(self.mt5_connector.get_positions())
-            if total_positions >= self.max_concurrent_trades:
-                return
+            order_type = signal['action']  # 'buy' or 'sell'
+            confidence = signal.get('confidence', 0.5)
 
-            # Calculate position size
-            account_info = self.mt5_connector.get_account_info()
-            lot_size = self.position_sizing.calculate_lot_size(
-                symbol, signal['direction'], signal.get('confidence', 70)
-            )
-
-            if lot_size <= 0:
-                return
-
-            # Calculate SL/TP based on percentage
-            entry_price = signal['price']
-            balance = account_info['balance']
-
-            # Risk 2% of balance per trade
-            risk_amount = balance * 0.02
-            symbol_info = self.mt5_connector.get_symbol_info(symbol)
-
-            if signal['direction'] == 'BUY':
-                # Stop loss 1.5% below entry
-                sl_price = entry_price * 0.985
-                # Take profit 3% above entry (2:1 RR)
-                tp_price = entry_price * 1.03
-                order_type = 0  # BUY
-            else:
-                # Stop loss 1.5% above entry
-                sl_price = entry_price * 1.015
-                # Take profit 3% below entry
-                tp_price = entry_price * 0.97
-                order_type = 1  # SELL
+            # Calculate SL/TP based on confidence and balance percentage
+            sl_pct = 1.0 / confidence  # Higher confidence = tighter SL
+            tp_pct = 2.0 * confidence  # Higher confidence = wider TP
 
             # Place order
-            result = self.order_manager.place_order(
+            result = self.order_manager.place_market_order(
                 symbol=symbol,
                 order_type=order_type,
-                lot_size=lot_size,
-                price=entry_price,
-                sl=sl_price,
-                tp=tp_price,
-                comment=f"{signal['strategy']} - Conf: {signal['confidence']:.1f}%"
+                volume=volume,
+                sl_pct=sl_pct,
+                tp_pct=tp_pct,
+                comment=f"AuraTrade-{strategy}"
             )
 
             if result['success']:
                 self.trades_today += 1
-                self.logger.info(f"Order placed: {symbol} {signal['direction']} {lot_size} lots")
+                self.logger.info(f"Trade executed: {symbol} {order_type} {volume} via {strategy}")
 
                 # Send notification
                 if self.notifier and self.notifier.enabled:
                     message = (
-                        f"🎯 New Trade Opened\n"
+                        f"🎯 Trade Signal Executed\n"
+                        f"Strategy: {strategy}\n"
                         f"Symbol: {symbol}\n"
-                        f"Direction: {signal['direction']}\n"
-                        f"Lot Size: {lot_size}\n"
-                        f"Entry: {entry_price:.5f}\n"
-                        f"SL: {sl_price:.5f}\n"
-                        f"TP: {tp_price:.5f}\n"
-                        f"Strategy: {signal['strategy']}\n"
-                        f"Confidence: {signal['confidence']:.1f}%"
+                        f"Action: {order_type.upper()}\n"
+                        f"Volume: {volume}\n"
+                        f"Confidence: {confidence:.2f}\n"
+                        f"Target Win Rate: 75%+"
                     )
-                    self.notifier.send_trade_alert(message)
+                    self.notifier.send_trade_signal(message)
+            else:
+                self.logger.warning(f"Failed to execute trade: {result['error']}")
 
         except Exception as e:
-            self.logger.error(f"Error executing signal: {e}")
+            self.logger.error(f"Error executing trade: {e}")
 
-    def _manage_positions(self):
-        """Manage existing positions"""
-        try:
-            positions = self.mt5_connector.get_positions()
-
-            for position in positions:
-                # Check for trailing stop
-                self._check_trailing_stop(position)
-
-                # Check for emergency close conditions
-                if position['profit'] < -500:  # Emergency close at $500 loss
-                    self.logger.warning(f"Emergency closing position {position['ticket']} due to large loss")
-                    self.mt5_connector.close_position(position['ticket'])
-
-                    if self.notifier and self.notifier.enabled:
-                        message = f"🚨 Emergency Close\nTicket: {position['ticket']}\nLoss: ${position['profit']:.2f}"
-                        self.notifier.send_trade_alert(message)
-
-        except Exception as e:
-            self.logger.error(f"Error managing positions: {e}")
-
-    def _check_trailing_stop(self, position: Dict[str, Any]):
-        """Check and update trailing stop"""
-        try:
-            symbol = position['symbol']
-            ticket = position['ticket']
-
-            symbol_info = self.mt5_connector.get_symbol_info(symbol)
-            if symbol_info is None:
-                return
-
-            current_price = symbol_info['bid'] if position['type'] == 0 else symbol_info['ask']
-            entry_price = position['price_open']
-            current_sl = position['sl']
-
-            # Only trail if in profit
-            if position['profit'] <= 0:
-                return
-
-            trailing_distance = entry_price * 0.01  # 1% trailing distance
-
-            if position['type'] == 0:  # BUY position
-                new_sl = current_price - trailing_distance
-                if current_sl == 0 or new_sl > current_sl:
-                    self.mt5_connector.modify_position(ticket, sl=new_sl, tp=position['tp'])
-                    self.logger.info(f"Trailing stop updated for {ticket}: {new_sl:.5f}")
-            else:  # SELL position
-                new_sl = current_price + trailing_distance
-                if current_sl == 0 or new_sl < current_sl:
-                    self.mt5_connector.modify_position(ticket, sl=new_sl, tp=position['tp'])
-                    self.logger.info(f"Trailing stop updated for {ticket}: {new_sl:.5f}")
-
-        except Exception as e:
-            self.logger.error(f"Error checking trailing stop: {e}")
-
-    def _update_performance(self):
+    def _update_performance(self) -> None:
         """Update performance metrics"""
         try:
+            # Get current positions
+            positions = self.order_manager.get_active_orders()
+
+            # Calculate current P&L
+            current_pnl = sum(pos.get('profit', 0) for pos in positions)
+
+            # Update daily P&L (simplified)
             account_info = self.mt5_connector.get_account_info()
-            current_balance = account_info.get('balance', 0.0)
-            self.daily_pnl = current_balance - self.start_balance
+            if account_info:
+                # This is a simplified calculation
+                self.daily_pnl = account_info.get('profit', 0)
 
-            # Update win/loss statistics
-            # This would typically be done when positions are closed
-            # For now, we'll estimate based on current positions
-            positions = self.mt5_connector.get_positions()
-            winning_positions = len([p for p in positions if p['profit'] > 0])
-            losing_positions = len([p for p in positions if p['profit'] < 0])
+            # Calculate win rate
+            total_trades = self.wins_today + self.losses_today
+            win_rate = (self.wins_today / total_trades * 100) if total_trades > 0 else 0
 
-            total_trades = self.wins + self.losses
-            if total_trades > 0:
-                win_rate = (self.wins / total_trades) * 100
-            else:
-                win_rate = 0
+            # Log performance every 100 trades
+            if self.trades_today % 100 == 0 and self.trades_today > 0:
+                self.logger.info(f"Performance Update - Trades: {self.trades_today}, Win Rate: {win_rate:.1f}%, P&L: ${self.daily_pnl:.2f}")
 
         except Exception as e:
             self.logger.error(f"Error updating performance: {e}")
 
+    def _validate_components(self) -> bool:
+        """Validate all required components"""
+        components = [
+            ('MT5 Connector', self.mt5_connector),
+            ('Order Manager', self.order_manager),
+            ('Risk Manager', self.risk_manager),
+            ('Position Sizing', self.position_sizing),
+            ('Data Manager', self.data_manager)
+        ]
+
+        for name, component in components:
+            if component is None:
+                self.logger.error(f"Missing component: {name}")
+                return False
+
+        # Check MT5 connection
+        if not self.mt5_connector.is_connected():
+            self.logger.error("MT5 not connected")
+            return False
+
+        self.logger.info("All components validated successfully")
+        return True
+
+    def _initialize_strategies(self) -> None:
+        """Initialize all trading strategies"""
+        try:
+            for name, strategy in self.strategies.items():
+                if hasattr(strategy, 'initialize'):
+                    strategy.initialize()
+                self.logger.info(f"Strategy initialized: {name}")
+        except Exception as e:
+            self.logger.error(f"Error initializing strategies: {e}")
+
+    def _emergency_close_all(self) -> None:
+        """Emergency close all positions"""
+        try:
+            self.logger.warning("Emergency close all positions")
+            result = self.order_manager.close_all_orders()
+
+            if self.notifier and self.notifier.enabled:
+                self.notifier.send_system_status(
+                    "emergency_stop",
+                    f"Emergency stop executed. Closed {result.get('closed', 0)} positions"
+                )
+
+        except Exception as e:
+            self.logger.error(f"Error in emergency close: {e}")
+
     def get_status(self) -> Dict[str, Any]:
         """Get current trading engine status"""
         try:
-            account_info = self.mt5_connector.get_account_info()
-            positions = self.mt5_connector.get_positions()
+            total_trades = self.wins_today + self.losses_today
+            win_rate = (self.wins_today / total_trades * 100) if total_trades > 0 else 0
 
-            total_trades = self.wins + self.losses
-            win_rate = (self.wins / total_trades * 100) if total_trades > 0 else 0
+            positions = self.order_manager.get_active_orders()
+            risk_metrics = self.risk_manager.get_risk_metrics()
+
+            runtime = datetime.now() - self.start_time
 
             return {
                 'running': self.running,
-                'connected': self.mt5_connector.is_connected(),
-                'balance': account_info.get('balance', 0.0),
-                'equity': account_info.get('equity', 0.0),
-                'free_margin': account_info.get('free_margin', 0.0),
-                'open_positions': len(positions),
+                'runtime': str(runtime).split('.')[0],
                 'trades_today': self.trades_today,
-                'wins': self.wins,
-                'losses': self.losses,
+                'wins_today': self.wins_today,
+                'losses_today': self.losses_today,
                 'win_rate': win_rate,
                 'daily_pnl': self.daily_pnl,
-                'total_profit': sum([p['profit'] for p in positions])
+                'active_positions': len(positions),
+                'symbols_trading': len(self.symbols),
+                'risk_metrics': risk_metrics,
+                'target_win_rate': 75.0
             }
 
         except Exception as e:
             self.logger.error(f"Error getting status: {e}")
-            return {
-                'running': self.running,
-                'connected': False,
-                'error': str(e)
-            }
+            return {'running': False, 'error': str(e)}
+
+    def force_close_symbol(self, symbol: str) -> Dict[str, Any]:
+        """Force close all positions for specific symbol"""
+        try:
+            return self.order_manager.close_all_orders(symbol)
+        except Exception as e:
+            self.logger.error(f"Error force closing {symbol}: {e}")
+            return {'success': False, 'error': str(e)}
+
+    def update_strategy_weights(self, weights: Dict[str, float]) -> None:
+        """Update strategy weights"""
+        try:
+            self.strategy_weights.update(weights)
+            self.logger.info(f"Strategy weights updated: {self.strategy_weights}")
+        except Exception as e:
+            self.logger.error(f"Error updating strategy weights: {e}")
