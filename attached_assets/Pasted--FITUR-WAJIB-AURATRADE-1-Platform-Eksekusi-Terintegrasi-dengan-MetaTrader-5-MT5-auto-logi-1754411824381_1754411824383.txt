@@ -1,0 +1,135 @@
+✅ FITUR WAJIB AURATRADE
+⚙️ 1. Platform & Eksekusi
+ Terintegrasi dengan MetaTrader 5 (MT5) (auto-login)
+
+ Bisa jalan langsung dengan: python bot.py
+
+ Multi-symbol support (bisa trading lebih dari 1 simbol)
+
+ Modular, arsitektur production-ready
+
+ Fallback mode saat MT5 disconnect (simulasi/paper mode)
+
+ Tidak menggunakan TA-Lib (semua indikator manual pakai NumPy/pandas)
+
+🧠 2. Strategi Trading (Multi-Strategy)
+ HFT Engine: Eksekusi ultra-cepat berbasis tick, sub-second latency
+
+ Scalping Strategy: Entry cepat, target kecil, logic fleksibel
+
+ Swing/Intraday Strategy: Logic berbasis trend, konfirmasi multi-timeframe
+
+ Arbitrage Detection (opsional)
+
+ Pattern Strategy: Candlestick & chart pattern recognition
+
+ Strategy modular & bisa aktif/nonaktif per config
+
+📊 3. Indikator Teknikal (Tanpa TA-Lib)
+ SMA / EMA / WMA (numpy)
+
+ RSI (pandas rolling)
+
+ MACD (custom EMA calculation)
+
+ Bollinger Bands (std dev)
+
+ Stochastic Oscillator
+
+ ATR (Average True Range)
+
+ Support & Resistance (dynamic S/R level detection)
+
+ Volume Analysis (custom indicator)
+
+ Trend strength & volatility index
+
+🧠 4. AI & Machine Learning (Opsional Tapi Siap Pakai)
+ Modul ML untuk prediksi arah trend (pakai sklearn/XGBoost)
+
+ Bisa aktif/nonaktif via config
+
+ Fitur evaluasi prediksi vs hasil nyata
+
+💼 5. Risk Management & Position Sizing
+ TP/SL ditentukan berdasarkan persentase modal (bukan pip)
+
+ Auto lot calculation berdasarkan risk %
+
+ Max exposure per session/hari
+
+ Drawdown control: stop jika DD harian melebihi limit
+
+ Trailing Stop otomatis (jika aktif)
+
+ Risk config per symbol/strategy
+
+📉 6. Manajemen Order
+ Auto placement / modify / close posisi
+
+ SL / TP otomatis dihitung real-time
+
+ SL/TP fleksibel: fixed %, trailing, ATR-based, dll
+
+ Session filter (misal: hanya trade jam tertentu)
+
+💬 7. Notifikasi & Logging
+ Telegram Notifier: open/close posisi, TP hit, SL hit, DD warning
+
+ Logging real-time ke file (logs/)
+
+ Error & event log terpisah
+
+ Bisa kirim summary harian lewat Telegram
+
+💻 8. GUI Dashboard (PyQt5)
+ Tampilan profesional: balance, equity, DD, trade log
+
+ Real-time chart: harga + indikator
+
+ Tombol STOP DARURAT
+
+ Multi-tab: strategi, monitoring, status koneksi
+
+ Live P/L & equity chart
+
+🔍 9. Analisa Pasar Otomatis
+ Analisis multi-timeframe otomatis (M1, M5, H1, dll.)
+
+ Deteksi kondisi pasar: trending, ranging, volatile
+
+ Heatmap kekuatan mata uang (opsional)
+
+ Analisis korelasi antar simbol (opsional)
+
+🗞️ 10. News & Sentiment Analysis
+ Modul NLP sederhana: analisis berita (pakai VADER atau transformers)
+
+ Bisa tarik berita via RSS / News API
+
+ Deteksi sentimen positif/negatif per simbol
+
+ Opsional integrasi dengan X (Twitter) sentiment feed
+
+📂 11. Data Management
+ Pull data dari MT5 secara live (candle, tick)
+
+ Backup historis (CSV/SQLite)
+
+ Support untuk data feed tambahan (misal Binance WebSocket)
+
+🔒 12. Keamanan & Kontrol
+ Auto reconnect MT5 bila disconnect
+
+ Emergency STOP tombol di GUI + kode
+
+ Proteksi login ganda (misal via Telegram PIN)
+
+⚡ 13. Deployment & Otomasi
+ Bisa jalan 24/7
+
+ Bisa dijalankan sebagai service / task scheduler
+
+ Auto start MT5 + login
+
+ Recovery otomatis bila restart/putus koneksi
