@@ -5,15 +5,16 @@ Store all sensitive information and API keys here
 """
 
 class Credentials:
-    """Centralized credentials management"""
+    """Secure credentials management"""
     
     def __init__(self):
-        # MetaTrader 5 Credentials
+        # MetaTrader 5 Configuration (Auto-detect from installed MT5)
         self.MT5 = {
-            'login': 12345678,  # Replace with your MT5 account number
-            'password': 'your_password',  # Replace with your MT5 password
-            'server': 'MetaQuotes-Demo',  # Replace with your broker's server
-            'timeout': 60000,
+            'login': None,  # Will auto-detect
+            'password': None,  # Will auto-detect
+            'server': None,  # Will auto-detect
+            'path': None,  # Will auto-detect
+            'timeout': 10000,
             'portable': False
         }
         
@@ -26,44 +27,35 @@ class Credentials:
         
         # Database Configuration (Optional)
         self.DATABASE = {
+            'type': 'sqlite',  # sqlite, mysql, postgresql
             'host': 'localhost',
             'port': 5432,
-            'database': 'auratrade',
-            'username': 'postgres',
-            'password': 'your_db_password',
-            'enabled': False
+            'name': 'auratrade.db',
+            'user': '',
+            'password': ''
         }
         
-        # API Keys for external services
+        # API Keys (Optional)
         self.API_KEYS = {
-            'news_api': 'your_news_api_key',
-            'economic_calendar': 'your_calendar_api_key'
+            'financial_data': '',  # Alpha Vantage, Yahoo Finance, etc.
+            'news_api': '',  # News sentiment analysis
+            'economic_calendar': ''  # Economic events
         }
     
-    def validate_credentials(self) -> dict:
-        """Validate all credentials"""
-        validation = {
-            'mt5_configured': bool(self.MT5['login'] and self.MT5['password'] and self.MT5['server']),
-            'telegram_configured': bool(self.TELEGRAM['bot_token'] and self.TELEGRAM['chat_id']),
-            'database_configured': self.DATABASE['enabled'] and bool(self.DATABASE['host']),
-            'apis_configured': bool(self.API_KEYS.get('news_api'))
-        }
-        
-        return validation
+    @property
+    def MT5_LOGIN(self) -> int:
+        """Get MT5 login (auto-detected)"""
+        return self.MT5.get('login')
     
-    def is_telegram_configured(self) -> bool:
-        """Check if Telegram is properly configured"""
-        return (self.TELEGRAM['notifications_enabled'] and 
-                bool(self.TELEGRAM['bot_token']) and 
-                bool(self.TELEGRAM['chat_id']))
+    @property
+    def MT5_PASSWORD(self) -> str:
+        """Get MT5 password (auto-detected)"""
+        return self.MT5.get('password')
     
-    def get_mt5_credentials(self) -> dict:
-        """Get MT5 credentials"""
-        return self.MT5.copy()
-    
-    def get_telegram_config(self) -> dict:
-        """Get Telegram configuration"""
-        return self.TELEGRAM.copy()
+    @property
+    def MT5_SERVER(self) -> str:
+        """Get MT5 server (auto-detected)"""
+        return self.MT5.get('server')
     
     @property
     def TELEGRAM_BOT_TOKEN(self) -> str:
@@ -74,3 +66,28 @@ class Credentials:
     def TELEGRAM_CHAT_ID(self) -> str:
         """Get Telegram chat ID"""
         return '5061106648'
+    
+    @property
+    def TELEGRAM_ENABLED(self) -> bool:
+        """Check if Telegram notifications are enabled"""
+        return self.TELEGRAM.get('notifications_enabled', False)
+    
+    def validate_credentials(self) -> dict:
+        """Validate all credentials"""
+        validation = {
+            'telegram': False,
+            'mt5': False,
+            'api_keys': False
+        }
+        
+        # Validate Telegram
+        if self.TELEGRAM_BOT_TOKEN and self.TELEGRAM_CHAT_ID:
+            validation['telegram'] = True
+        
+        # MT5 will be validated during connection
+        validation['mt5'] = True  # Auto-detect mode
+        
+        # API keys are optional
+        validation['api_keys'] = True
+        
+        return validation

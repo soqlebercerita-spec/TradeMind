@@ -27,7 +27,6 @@ from core.position_sizing import PositionSizing
 from data.data_manager import DataManager
 from gui.main_window import MainWindow
 from utils.logger import Logger
-from utils.notifier import TelegramNotifier as Notifier # Alias TelegramNotifier to Notifier for brevity
 from utils.notifier import TelegramNotifier
 
 class MLEngine:
@@ -62,7 +61,7 @@ class AuraTradeBot:
         self.logger.info("🤖 AuraTrade Bot initialized")
 
         # Initialize notification system
-        self.notifier = Notifier()
+        self.notifier = TelegramNotifier()
         self.logger.info("📱 Notification system initialized")
 
         # Send startup notification
