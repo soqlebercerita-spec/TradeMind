@@ -1,3 +1,4 @@
+
 """
 Safe Windows-compatible logging system for AuraTrade Bot
 Handles Unicode issues and provides structured logging
@@ -41,118 +42,100 @@ class SafeFormatter(logging.Formatter):
             msg = msg.replace(emoji, replacement)
 
         # Ensure ASCII-safe output
-        msg = msg.encode('ascii', errors='replace').decode('ascii')
+        try:
+            msg = msg.encode('ascii', errors='replace').decode('ascii')
+        except:
+            msg = repr(msg)
 
         return msg
 
 class Logger:
-    """Thread-safe logger for AuraTrade Bot"""
-
+    """Thread-safe logger with Windows compatibility"""
+    
     _instance = None
     _lock = threading.Lock()
-
+    
     def __new__(cls):
         if cls._instance is None:
             with cls._lock:
                 if cls._instance is None:
                     cls._instance = super().__new__(cls)
-                    cls._instance._initialized = False
         return cls._instance
-
+    
     def __init__(self):
-        if self._initialized:
-            return
-
-        self._initialized = True
-        self.logger = None
-        self._setup_logger()
-
+        if not hasattr(self, 'initialized'):
+            self.initialized = True
+            self._setup_logger()
+    
     def _setup_logger(self):
-        """Setup logging configuration"""
+        """Setup logger with safe configuration"""
+        # Create logs directory
+        log_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'logs')
+        os.makedirs(log_dir, exist_ok=True)
+        
+        # Configure main logger
+        self.logger = logging.getLogger('AuraTrade')
+        self.logger.setLevel(logging.INFO)
+        
+        # Clear existing handlers
+        self.logger.handlers.clear()
+        
+        # Console handler with safe formatter
+        console_handler = logging.StreamHandler(sys.stdout)
+        console_handler.setLevel(logging.INFO)
+        console_formatter = SafeFormatter(
+            '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+            datefmt='%Y-%m-%d %H:%M:%S'
+        )
+        console_handler.setFormatter(console_formatter)
+        self.logger.addHandler(console_handler)
+        
+        # File handler with safe encoding
+        log_file = os.path.join(log_dir, f'auratrade_{datetime.now().strftime("%Y%m%d")}.log')
         try:
-            # Create logs directory
-            log_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'logs')
-            os.makedirs(log_dir, exist_ok=True)
-
-            # Configure logger
-            self.logger = logging.getLogger('AuraTrade')
-            self.logger.setLevel(logging.INFO)
-
-            # Clear existing handlers
-            self.logger.handlers.clear()
-
-            # Console handler
-            console_handler = logging.StreamHandler(sys.stdout)
-            console_handler.setLevel(logging.INFO)
-
-            # File handler
-            log_file = os.path.join(log_dir, f'auratrade_{datetime.now().strftime("%Y%m%d")}.log')
-            file_handler = logging.FileHandler(log_file, encoding='utf-8', mode='a')
+            file_handler = logging.FileHandler(log_file, encoding='utf-8', errors='replace')
             file_handler.setLevel(logging.DEBUG)
-
-            # Safe formatter
-            formatter = SafeFormatter(
-                '%(asctime)s | %(levelname)-8s | %(name)s | %(message)s',
+            file_formatter = SafeFormatter(
+                '%(asctime)s - %(name)s - %(levelname)s - %(funcName)s:%(lineno)d - %(message)s',
                 datefmt='%Y-%m-%d %H:%M:%S'
             )
-
-            console_handler.setFormatter(formatter)
-            file_handler.setFormatter(formatter)
-
-            self.logger.addHandler(console_handler)
+            file_handler.setFormatter(file_formatter)
             self.logger.addHandler(file_handler)
-
-            # Prevent propagation to root logger
-            self.logger.propagate = False
-
-            self.logger.info("Logger initialized successfully")
-
         except Exception as e:
-            print(f"Failed to setup logger: {e}")
-            # Fallback to basic console logging
-            logging.basicConfig(
-                level=logging.INFO,
-                format='%(asctime)s | %(levelname)-8s | %(message)s',
-                datefmt='%Y-%m-%d %H:%M:%S'
-            )
-            self.logger = logging.getLogger('AuraTrade')
-
+            print(f"Warning: Could not setup file logging: {e}")
+        
+        # Prevent propagation to root logger
+        self.logger.propagate = False
+        
     def get_logger(self):
-        """Get the configured logger instance"""
+        """Get the configured logger"""
         return self.logger
 
-    @classmethod
-    def get_instance(cls):
-        """Get singleton logger instance"""
-        return cls().get_logger()
-
-# Module-level convenience functions
-def get_logger(name: Optional[str] = None):
-    """Get logger instance with optional name"""
+# Convenience functions for easy logging
+def log_info(component: str, message: str):
+    """Log info message with component prefix"""
     logger = Logger().get_logger()
-    if name:
-        return logger.getChild(name)
-    return logger
+    logger.info(f"[{component}] {message}")
 
-def log_trade(action: str, symbol: str, volume: float, price: float, profit: float = 0.0):
-    """Log trading activity"""
-    logger = get_logger("TRADE")
-    logger.info(f"{action.upper()} {volume} {symbol} @ {price:.5f} | P&L: ${profit:.2f}")
-
-def log_error(component: str, message: str, exception: Exception = None):
-    """Log error with component context"""
-    logger = get_logger(component)
+def log_error(component: str, message: str, exception: Optional[Exception] = None):
+    """Log error message with component prefix"""
+    logger = Logger().get_logger()
     if exception:
-        logger.error(f"{message}: {str(exception)}")
+        logger.error(f"[{component}] {message}: {str(exception)}")
     else:
-        logger.error(message)
+        logger.error(f"[{component}] {message}")
 
-def log_system(message: str, level: str = "INFO"):
-    """Log system message"""
-    logger = get_logger("SYSTEM")
-    if level.upper() == "ERROR":
-        logger.error(message)
-    elif level.upper() == "WARNING":
-        logger.warning(message)
-    else:
-        logger.info(message)
+def log_warning(component: str, message: str):
+    """Log warning message with component prefix"""
+    logger = Logger().get_logger()
+    logger.warning(f"[{component}] {message}")
+
+def log_debug(component: str, message: str):
+    """Log debug message with component prefix"""
+    logger = Logger().get_logger()
+    logger.debug(f"[{component}] {message}")
+
+def log_trade(action: str, symbol: str, details: str):
+    """Log trading activity"""
+    logger = Logger().get_logger()
+    logger.info(f"[TRADE] {action} {symbol} - {details}")

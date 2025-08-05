@@ -1,307 +1,340 @@
 
 """
-Portfolio management for AuraTrade Bot
-Tracks performance, risk, and portfolio metrics
+Portfolio Management Module for AuraTrade Bot
+Track and manage trading portfolio performance
 """
 
-from typing import Dict, List, Optional, Any
 from datetime import datetime, timedelta
+from typing import Dict, List, Optional, Any
 import pandas as pd
-from core.mt5_connector import MT5Connector
-from utils.logger import Logger
+from utils.logger import Logger, log_info, log_error, log_trade
 
-class PortfolioManager:
-    """Advanced portfolio tracking and analysis"""
-
-    def __init__(self, mt5_connector: MT5Connector):
+class Portfolio:
+    """Portfolio management and performance tracking"""
+    
+    def __init__(self, mt5_connector):
         self.logger = Logger().get_logger()
-        self.mt5 = mt5_connector
+        self.mt5_connector = mt5_connector
         
-        # Performance tracking
+        # Portfolio state
+        self.positions = {}
         self.trade_history = []
         self.daily_stats = {}
-        self.monthly_stats = {}
+        self.performance_metrics = {}
         
-        # Risk metrics
-        self.max_drawdown = 0.0
-        self.current_drawdown = 0.0
-        self.peak_balance = 0.0
+        # Performance tracking
+        self.starting_balance = 0
+        self.peak_balance = 0
+        self.current_drawdown = 0
+        self.max_drawdown = 0
         
-        # Performance metrics
-        self.total_trades = 0
-        self.winning_trades = 0
-        self.losing_trades = 0
-        self.total_profit = 0.0
-        self.gross_profit = 0.0
-        self.gross_loss = 0.0
+        self._initialize_portfolio()
         
-        self.logger.info("PortfolioManager initialized")
-
-    def update_portfolio(self):
-        """Update portfolio metrics"""
+    def _initialize_portfolio(self):
+        """Initialize portfolio with current account state"""
         try:
-            # Get current account info
-            account = self.mt5.get_account_info()
-            if not account:
-                return
+            account_info = self.mt5_connector.get_account_info()
+            if account_info:
+                self.starting_balance = account_info.get('balance', 0)
+                self.peak_balance = self.starting_balance
+                
+            log_info("Portfolio", f"Initialized with balance: ${self.starting_balance:.2f}")
             
-            current_balance = account.get('balance', 0)
-            current_equity = account.get('equity', 0)
+        except Exception as e:
+            log_error("Portfolio", "Error initializing portfolio", e)
+    
+    def update_positions(self):
+        """Update current positions from MT5"""
+        try:
+            positions = self.mt5_connector.get_positions()
+            self.positions = {}
             
-            # Update peak balance
-            if current_balance > self.peak_balance:
-                self.peak_balance = current_balance
-            
-            # Calculate drawdown
-            if self.peak_balance > 0:
-                self.current_drawdown = (self.peak_balance - current_balance) / self.peak_balance
-                if self.current_drawdown > self.max_drawdown:
-                    self.max_drawdown = self.current_drawdown
-            
-            # Update daily stats
-            today = datetime.now().strftime('%Y-%m-%d')
-            if today not in self.daily_stats:
-                self.daily_stats[today] = {
-                    'start_balance': current_balance,
-                    'trades': 0,
-                    'profit': 0.0,
-                    'wins': 0,
-                    'losses': 0
+            for pos in positions:
+                symbol = pos.get('symbol')
+                self.positions[symbol] = {
+                    'ticket': pos.get('ticket'),
+                    'symbol': symbol,
+                    'volume': pos.get('volume'),
+                    'type': 'BUY' if pos.get('type') == 0 else 'SELL',
+                    'open_price': pos.get('price_open'),
+                    'current_price': pos.get('price_current'),
+                    'profit': pos.get('profit'),
+                    'swap': pos.get('swap'),
+                    'commission': pos.get('commission'),
+                    'open_time': pos.get('time'),
+                    'sl': pos.get('sl'),
+                    'tp': pos.get('tp')
                 }
             
-            # Get positions for current profit calculation
-            positions = self.mt5.get_positions()
-            unrealized_pnl = sum(pos['profit'] for pos in positions)
-            
-            return {
-                'balance': current_balance,
-                'equity': current_equity,
-                'unrealized_pnl': unrealized_pnl,
-                'current_drawdown': self.current_drawdown,
-                'max_drawdown': self.max_drawdown,
-                'peak_balance': self.peak_balance
-            }
+            return self.positions
             
         except Exception as e:
-            self.logger.error(f"Error updating portfolio: {e}")
+            log_error("Portfolio", "Error updating positions", e)
             return {}
-
-    def record_trade(self, trade_data: Dict[str, Any]):
-        """Record completed trade"""
+    
+    def get_portfolio_summary(self) -> Dict[str, Any]:
+        """Get comprehensive portfolio summary"""
         try:
-            self.trade_history.append({
-                'timestamp': datetime.now(),
-                'symbol': trade_data.get('symbol', ''),
-                'type': trade_data.get('type', ''),
-                'volume': trade_data.get('volume', 0),
-                'entry_price': trade_data.get('entry_price', 0),
-                'exit_price': trade_data.get('exit_price', 0),
-                'profit': trade_data.get('profit', 0),
-                'duration': trade_data.get('duration', 0),
-                'strategy': trade_data.get('strategy', '')
-            })
+            account_info = self.mt5_connector.get_account_info()
+            positions = self.update_positions()
             
-            # Update statistics
-            self.total_trades += 1
-            profit = trade_data.get('profit', 0)
+            current_balance = account_info.get('balance', 0)
+            current_equity = account_info.get('equity', 0)
+            current_margin = account_info.get('margin', 0)
+            free_margin = account_info.get('free_margin', 0)
+            
+            # Calculate performance metrics
+            total_profit_loss = current_balance - self.starting_balance
+            profit_loss_percent = (total_profit_loss / self.starting_balance * 100) if self.starting_balance > 0 else 0
+            
+            # Update drawdown
+            if current_balance > self.peak_balance:
+                self.peak_balance = current_balance
+                self.current_drawdown = 0
+            else:
+                self.current_drawdown = (self.peak_balance - current_balance) / self.peak_balance * 100
+                self.max_drawdown = max(self.max_drawdown, self.current_drawdown)
+            
+            # Position summary
+            open_positions = len(positions)
+            total_position_profit = sum(pos.get('profit', 0) for pos in positions.values())
+            
+            # Risk metrics
+            margin_level = (current_equity / current_margin * 100) if current_margin > 0 else 0
+            
+            summary = {
+                'timestamp': datetime.now(),
+                'account': {
+                    'balance': current_balance,
+                    'equity': current_equity,
+                    'margin': current_margin,
+                    'free_margin': free_margin,
+                    'margin_level': margin_level
+                },
+                'performance': {
+                    'starting_balance': self.starting_balance,
+                    'total_pnl': total_profit_loss,
+                    'pnl_percent': profit_loss_percent,
+                    'current_drawdown': self.current_drawdown,
+                    'max_drawdown': self.max_drawdown,
+                    'peak_balance': self.peak_balance
+                },
+                'positions': {
+                    'open_count': open_positions,
+                    'total_profit': total_position_profit,
+                    'symbols': list(positions.keys())
+                },
+                'risk': {
+                    'margin_usage': (current_margin / current_equity * 100) if current_equity > 0 else 0,
+                    'free_margin_percent': (free_margin / current_equity * 100) if current_equity > 0 else 0
+                }
+            }
+            
+            return summary
+            
+        except Exception as e:
+            log_error("Portfolio", "Error getting portfolio summary", e)
+            return {}
+    
+    def record_trade(self, trade_info: Dict[str, Any]):
+        """Record completed trade for performance analysis"""
+        try:
+            trade_record = {
+                'timestamp': datetime.now(),
+                'ticket': trade_info.get('ticket'),
+                'symbol': trade_info.get('symbol'),
+                'type': trade_info.get('type'),
+                'volume': trade_info.get('volume'),
+                'open_price': trade_info.get('open_price'),
+                'close_price': trade_info.get('close_price'),
+                'profit': trade_info.get('profit'),
+                'commission': trade_info.get('commission'),
+                'swap': trade_info.get('swap'),
+                'duration': trade_info.get('duration', 0),
+                'strategy': trade_info.get('strategy', 'Unknown')
+            }
+            
+            self.trade_history.append(trade_record)
+            
+            # Log the trade
+            profit_loss = trade_record.get('profit', 0)
+            symbol = trade_record.get('symbol')
+            trade_type = trade_record.get('type')
+            volume = trade_record.get('volume')
+            
+            log_trade(
+                f"{trade_type} CLOSED",
+                symbol,
+                f"Volume: {volume}, P&L: ${profit_loss:.2f}"
+            )
+            
+            # Update daily statistics
+            self._update_daily_stats(trade_record)
+            
+        except Exception as e:
+            log_error("Portfolio", "Error recording trade", e)
+    
+    def _update_daily_stats(self, trade_record: Dict[str, Any]):
+        """Update daily trading statistics"""
+        try:
+            today = datetime.now().date()
+            
+            if today not in self.daily_stats:
+                self.daily_stats[today] = {
+                    'trades': 0,
+                    'winning_trades': 0,
+                    'losing_trades': 0,
+                    'total_profit': 0,
+                    'gross_profit': 0,
+                    'gross_loss': 0,
+                    'volume_traded': 0
+                }
+            
+            stats = self.daily_stats[today]
+            profit = trade_record.get('profit', 0)
+            volume = trade_record.get('volume', 0)
+            
+            stats['trades'] += 1
+            stats['total_profit'] += profit
+            stats['volume_traded'] += volume
             
             if profit > 0:
-                self.winning_trades += 1
-                self.gross_profit += profit
+                stats['winning_trades'] += 1
+                stats['gross_profit'] += profit
             else:
-                self.losing_trades += 1
-                self.gross_loss += abs(profit)
-            
-            self.total_profit += profit
-            
-            # Update daily stats
-            today = datetime.now().strftime('%Y-%m-%d')
-            if today in self.daily_stats:
-                self.daily_stats[today]['trades'] += 1
-                self.daily_stats[today]['profit'] += profit
-                if profit > 0:
-                    self.daily_stats[today]['wins'] += 1
-                else:
-                    self.daily_stats[today]['losses'] += 1
-            
-            self.logger.info(f"Trade recorded: {trade_data.get('symbol', '')} P&L: {profit:.2f}")
+                stats['losing_trades'] += 1
+                stats['gross_loss'] += abs(profit)
             
         except Exception as e:
-            self.logger.error(f"Error recording trade: {e}")
-
+            log_error("Portfolio", "Error updating daily stats", e)
+    
     def get_performance_metrics(self) -> Dict[str, Any]:
-        """Get comprehensive performance metrics"""
+        """Calculate comprehensive performance metrics"""
         try:
-            # Calculate win rate
-            win_rate = (self.winning_trades / self.total_trades * 100) if self.total_trades > 0 else 0
-            
-            # Calculate profit factor
-            profit_factor = (self.gross_profit / abs(self.gross_loss)) if self.gross_loss != 0 else 0
-            
-            # Calculate average win/loss
-            avg_win = (self.gross_profit / self.winning_trades) if self.winning_trades > 0 else 0
-            avg_loss = (abs(self.gross_loss) / self.losing_trades) if self.losing_trades > 0 else 0
-            
-            # Calculate risk-reward ratio
-            risk_reward_ratio = (avg_win / avg_loss) if avg_loss > 0 else 0
-            
-            # Get recent performance (last 30 trades)
-            recent_trades = self.trade_history[-30:] if len(self.trade_history) >= 30 else self.trade_history
-            recent_wins = sum(1 for trade in recent_trades if trade['profit'] > 0)
-            recent_win_rate = (recent_wins / len(recent_trades) * 100) if recent_trades else 0
-            
-            return {
-                'total_trades': self.total_trades,
-                'winning_trades': self.winning_trades,
-                'losing_trades': self.losing_trades,
-                'win_rate': win_rate,
-                'total_profit': self.total_profit,
-                'gross_profit': self.gross_profit,
-                'gross_loss': self.gross_loss,
-                'profit_factor': profit_factor,
-                'avg_win': avg_win,
-                'avg_loss': avg_loss,
-                'risk_reward_ratio': risk_reward_ratio,
-                'max_drawdown': self.max_drawdown,
-                'current_drawdown': self.current_drawdown,
-                'recent_win_rate': recent_win_rate,
-                'peak_balance': self.peak_balance
-            }
-            
-        except Exception as e:
-            self.logger.error(f"Error calculating performance metrics: {e}")
-            return {}
-
-    def get_daily_summary(self, date: str = None) -> Dict[str, Any]:
-        """Get daily performance summary"""
-        try:
-            if date is None:
-                date = datetime.now().strftime('%Y-%m-%d')
-            
-            if date not in self.daily_stats:
+            if not self.trade_history:
                 return {}
             
-            stats = self.daily_stats[date]
-            win_rate = (stats['wins'] / stats['trades'] * 100) if stats['trades'] > 0 else 0
+            # Basic metrics
+            total_trades = len(self.trade_history)
+            winning_trades = sum(1 for trade in self.trade_history if trade.get('profit', 0) > 0)
+            losing_trades = total_trades - winning_trades
             
-            return {
-                'date': date,
-                'trades': stats['trades'],
-                'wins': stats['wins'],
-                'losses': stats['losses'],
+            win_rate = (winning_trades / total_trades * 100) if total_trades > 0 else 0
+            
+            # Profit metrics
+            profits = [trade.get('profit', 0) for trade in self.trade_history]
+            total_profit = sum(profits)
+            avg_profit = total_profit / total_trades if total_trades > 0 else 0
+            
+            winning_profits = [p for p in profits if p > 0]
+            losing_profits = [p for p in profits if p < 0]
+            
+            avg_win = sum(winning_profits) / len(winning_profits) if winning_profits else 0
+            avg_loss = sum(losing_profits) / len(losing_profits) if losing_profits else 0
+            
+            profit_factor = (sum(winning_profits) / abs(sum(losing_profits))) if losing_profits else float('inf')
+            
+            # Risk metrics
+            sharpe_ratio = self._calculate_sharpe_ratio(profits)
+            
+            # Trading frequency
+            first_trade = min(trade['timestamp'] for trade in self.trade_history)
+            days_trading = (datetime.now() - first_trade).days or 1
+            trades_per_day = total_trades / days_trading
+            
+            metrics = {
+                'total_trades': total_trades,
+                'winning_trades': winning_trades,
+                'losing_trades': losing_trades,
                 'win_rate': win_rate,
-                'profit': stats['profit'],
-                'start_balance': stats['start_balance']
+                'total_profit': total_profit,
+                'avg_profit_per_trade': avg_profit,
+                'avg_win': avg_win,
+                'avg_loss': avg_loss,
+                'profit_factor': profit_factor,
+                'sharpe_ratio': sharpe_ratio,
+                'max_drawdown': self.max_drawdown,
+                'current_drawdown': self.current_drawdown,
+                'trades_per_day': trades_per_day,
+                'days_trading': days_trading
             }
             
+            return metrics
+            
         except Exception as e:
-            self.logger.error(f"Error getting daily summary: {e}")
+            log_error("Portfolio", "Error calculating performance metrics", e)
             return {}
-
-    def get_symbol_performance(self) -> Dict[str, Any]:
-        """Get performance breakdown by symbol"""
+    
+    def _calculate_sharpe_ratio(self, profits: List[float]) -> float:
+        """Calculate Sharpe ratio for performance evaluation"""
         try:
-            symbol_stats = {}
+            if len(profits) < 2:
+                return 0
             
-            for trade in self.trade_history:
-                symbol = trade['symbol']
-                if symbol not in symbol_stats:
-                    symbol_stats[symbol] = {
-                        'trades': 0,
-                        'wins': 0,
-                        'losses': 0,
-                        'profit': 0.0
-                    }
-                
-                symbol_stats[symbol]['trades'] += 1
-                symbol_stats[symbol]['profit'] += trade['profit']
-                
-                if trade['profit'] > 0:
-                    symbol_stats[symbol]['wins'] += 1
-                else:
-                    symbol_stats[symbol]['losses'] += 1
+            # Calculate returns
+            returns = pd.Series(profits)
+            mean_return = returns.mean()
+            std_return = returns.std()
             
-            # Calculate win rates
-            for symbol in symbol_stats:
-                stats = symbol_stats[symbol]
-                stats['win_rate'] = (stats['wins'] / stats['trades'] * 100) if stats['trades'] > 0 else 0
+            # Sharpe ratio (assuming risk-free rate of 0)
+            sharpe = mean_return / std_return if std_return != 0 else 0
             
-            return symbol_stats
+            return sharpe
             
         except Exception as e:
-            self.logger.error(f"Error getting symbol performance: {e}")
+            log_error("Portfolio", "Error calculating Sharpe ratio", e)
+            return 0
+    
+    def get_daily_report(self, date: Optional[datetime] = None) -> Dict[str, Any]:
+        """Get daily trading report"""
+        try:
+            target_date = (date or datetime.now()).date()
+            
+            if target_date not in self.daily_stats:
+                return {
+                    'date': target_date,
+                    'trades': 0,
+                    'profit': 0,
+                    'win_rate': 0
+                }
+            
+            stats = self.daily_stats[target_date]
+            
+            win_rate = (stats['winning_trades'] / stats['trades'] * 100) if stats['trades'] > 0 else 0
+            
+            report = {
+                'date': target_date,
+                'trades': stats['trades'],
+                'winning_trades': stats['winning_trades'],
+                'losing_trades': stats['losing_trades'],
+                'win_rate': win_rate,
+                'total_profit': stats['total_profit'],
+                'gross_profit': stats['gross_profit'],
+                'gross_loss': stats['gross_loss'],
+                'volume_traded': stats['volume_traded'],
+                'avg_profit_per_trade': stats['total_profit'] / stats['trades'] if stats['trades'] > 0 else 0
+            }
+            
+            return report
+            
+        except Exception as e:
+            log_error("Portfolio", f"Error getting daily report for {target_date}", e)
             return {}
-
-    def get_strategy_performance(self) -> Dict[str, Any]:
-        """Get performance breakdown by strategy"""
+    
+    def reset_performance_tracking(self):
+        """Reset performance tracking (for new trading period)"""
         try:
-            strategy_stats = {}
+            account_info = self.mt5_connector.get_account_info()
+            if account_info:
+                self.starting_balance = account_info.get('balance', 0)
+                self.peak_balance = self.starting_balance
             
-            for trade in self.trade_history:
-                strategy = trade.get('strategy', 'Unknown')
-                if strategy not in strategy_stats:
-                    strategy_stats[strategy] = {
-                        'trades': 0,
-                        'wins': 0,
-                        'losses': 0,
-                        'profit': 0.0
-                    }
-                
-                strategy_stats[strategy]['trades'] += 1
-                strategy_stats[strategy]['profit'] += trade['profit']
-                
-                if trade['profit'] > 0:
-                    strategy_stats[strategy]['wins'] += 1
-                else:
-                    strategy_stats[strategy]['losses'] += 1
-            
-            # Calculate win rates
-            for strategy in strategy_stats:
-                stats = strategy_stats[strategy]
-                stats['win_rate'] = (stats['wins'] / stats['trades'] * 100) if stats['trades'] > 0 else 0
-            
-            return strategy_stats
-            
-        except Exception as e:
-            self.logger.error(f"Error getting strategy performance: {e}")
-            return {}
-
-    def export_trade_history(self, filename: str = None) -> str:
-        """Export trade history to CSV"""
-        try:
-            if filename is None:
-                filename = f"trade_history_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
-            
-            if not self.trade_history:
-                return "No trade history to export"
-            
-            df = pd.DataFrame(self.trade_history)
-            df.to_csv(filename, index=False)
-            
-            self.logger.info(f"Trade history exported to {filename}")
-            return filename
-            
-        except Exception as e:
-            self.logger.error(f"Error exporting trade history: {e}")
-            return f"Export failed: {e}"
-
-    def reset_statistics(self):
-        """Reset all statistics (use with caution)"""
-        try:
+            self.current_drawdown = 0
+            self.max_drawdown = 0
             self.trade_history = []
             self.daily_stats = {}
-            self.monthly_stats = {}
-            self.total_trades = 0
-            self.winning_trades = 0
-            self.losing_trades = 0
-            self.total_profit = 0.0
-            self.gross_profit = 0.0
-            self.gross_loss = 0.0
-            self.max_drawdown = 0.0
-            self.current_drawdown = 0.0
-            self.peak_balance = 0.0
             
-            self.logger.info("Portfolio statistics reset")
+            log_info("Portfolio", "Performance tracking reset")
             
         except Exception as e:
-            self.logger.error(f"Error resetting statistics: {e}")
+            log_error("Portfolio", "Error resetting performance tracking", e)
