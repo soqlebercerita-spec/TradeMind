@@ -1,324 +1,241 @@
 
 """
 Swing Trading Strategy for AuraTrade Bot
-Medium-term position trading for 75%+ win rate
+Medium-term position trading based on trend analysis
 """
 
 import pandas as pd
 import numpy as np
 from typing import Dict, List, Optional, Any
 from datetime import datetime, timedelta
+from analysis.technical_analysis import TechnicalAnalysis
 from utils.logger import Logger
 
 class SwingStrategy:
-    """Conservative swing trading strategy"""
+    """Swing trading strategy with trend following"""
 
     def __init__(self):
         self.logger = Logger().get_logger()
-        self.name = "swing"
-        self.timeframe = "H4"
-        self.min_confidence = 0.7
+        self.technical_analysis = TechnicalAnalysis()
         
         # Strategy parameters
-        self.rsi_period = 14
-        self.ma_short = 20
-        self.ma_long = 50
-        self.bb_period = 20
-        self.bb_std = 2
+        self.name = "Swing Strategy"
+        self.timeframe = 'H4'
+        self.min_trend_strength = 0.6
+        self.rsi_oversold = 30
+        self.rsi_overbought = 70
+        self.macd_signal_threshold = 0.001
         
         self.logger.info("SwingStrategy initialized")
 
-    def initialize(self):
-        """Initialize strategy"""
-        self.logger.info("Swing strategy initialized for H4 timeframe")
-
-    def analyze(self, symbol: str, data: pd.DataFrame) -> Optional[Dict[str, Any]]:
-        """Analyze symbol for swing trading opportunities"""
+    def generate_signal(self, symbol: str, data: Dict[str, pd.DataFrame]) -> Optional[Dict[str, Any]]:
+        """Generate swing trading signal"""
         try:
-            if data is None or len(data) < 50:
-                return None
-
-            # Calculate indicators
-            indicators = self._calculate_indicators(data)
+            # Use H4 data for swing analysis
+            if 'H4' not in data or data['H4'].empty:
+                return {'action': 'HOLD', 'confidence': 0, 'reason': 'No H4 data'}
             
-            # Generate signals
-            signal = self._generate_signal(indicators, data)
+            df = data['H4'].copy()
             
-            if signal and signal['action'] != 'hold':
-                self.logger.info(f"Swing signal for {symbol}: {signal['action']} (confidence: {signal['confidence']:.2f})")
-                
+            if len(df) < 50:  # Need enough data for swing analysis
+                return {'action': 'HOLD', 'confidence': 0, 'reason': 'Insufficient data'}
+            
+            # Calculate technical indicators
+            indicators = self._calculate_indicators(df)
+            
+            # Analyze trend
+            trend_analysis = self._analyze_trend(df, indicators)
+            
+            # Generate signal
+            signal = self._evaluate_signal(df, indicators, trend_analysis)
+            
+            if signal and signal['action'] != 'HOLD':
+                self.logger.info(f"Swing signal: {symbol} {signal['action']} (confidence: {signal['confidence']:.2f})")
+            
             return signal
             
         except Exception as e:
-            self.logger.error(f"Error analyzing {symbol} for swing: {e}")
-            return None
+            self.logger.error(f"Error generating swing signal for {symbol}: {e}")
+            return {'action': 'HOLD', 'confidence': 0, 'reason': f'Error: {str(e)}'}
 
-    def _calculate_indicators(self, data: pd.DataFrame) -> Dict[str, Any]:
-        """Calculate technical indicators"""
+    def _calculate_indicators(self, df: pd.DataFrame) -> Dict[str, Any]:
+        """Calculate technical indicators for swing analysis"""
         try:
-            close = data['close'].values
-            high = data['high'].values
-            low = data['low'].values
+            indicators = {}
             
             # Moving averages
-            ma_short = self._sma(close, self.ma_short)
-            ma_long = self._sma(close, self.ma_long)
+            indicators['ema_20'] = self.technical_analysis.calculate_ema(df['close'], 20)
+            indicators['ema_50'] = self.technical_analysis.calculate_ema(df['close'], 50)
+            indicators['sma_200'] = self.technical_analysis.calculate_sma(df['close'], 200)
             
             # RSI
-            rsi = self._rsi(close, self.rsi_period)
-            
-            # Bollinger Bands
-            bb_middle = self._sma(close, self.bb_period)
-            bb_std = self._rolling_std(close, self.bb_period)
-            bb_upper = bb_middle + (bb_std * self.bb_std)
-            bb_lower = bb_middle - (bb_std * self.bb_std)
+            indicators['rsi'] = self.technical_analysis.calculate_rsi(df['close'], 14)
             
             # MACD
-            ema_12 = self._ema(close, 12)
-            ema_26 = self._ema(close, 26)
-            macd_line = ema_12 - ema_26
-            macd_signal = self._ema(macd_line, 9)
-            macd_histogram = macd_line - macd_signal
+            macd_data = self.technical_analysis.calculate_macd(df['close'])
+            indicators['macd'] = macd_data['macd']
+            indicators['macd_signal'] = macd_data['signal']
+            indicators['macd_histogram'] = macd_data['histogram']
             
-            # Support/Resistance levels
-            support = self._find_support_resistance(high, low, close)
+            # Bollinger Bands
+            bb_data = self.technical_analysis.calculate_bollinger_bands(df['close'], 20, 2)
+            indicators['bb_upper'] = bb_data['upper']
+            indicators['bb_middle'] = bb_data['middle']
+            indicators['bb_lower'] = bb_data['lower']
             
-            return {
-                'ma_short': ma_short,
-                'ma_long': ma_long,
-                'rsi': rsi,
-                'bb_upper': bb_upper,
-                'bb_middle': bb_middle,
-                'bb_lower': bb_lower,
-                'macd_line': macd_line,
-                'macd_signal': macd_signal,
-                'macd_histogram': macd_histogram,
-                'support_resistance': support,
-                'close': close
-            }
+            # ATR for volatility
+            indicators['atr'] = self.technical_analysis.calculate_atr(df['high'], df['low'], df['close'], 14)
+            
+            # Support and Resistance
+            indicators['support'] = self._find_support_resistance(df, 'support')
+            indicators['resistance'] = self._find_support_resistance(df, 'resistance')
+            
+            return indicators
             
         except Exception as e:
             self.logger.error(f"Error calculating swing indicators: {e}")
             return {}
 
-    def _generate_signal(self, indicators: Dict[str, Any], data: pd.DataFrame) -> Optional[Dict[str, Any]]:
-        """Generate trading signal based on indicators"""
+    def _analyze_trend(self, df: pd.DataFrame, indicators: Dict) -> Dict[str, Any]:
+        """Analyze market trend for swing trading"""
         try:
-            if not indicators:
-                return None
+            current_price = df['close'].iloc[-1]
             
-            current_idx = -1
-            confidence = 0.0
-            action = 'hold'
+            # EMA trend analysis
+            ema_20 = indicators['ema_20'].iloc[-1] if not indicators['ema_20'].empty else 0
+            ema_50 = indicators['ema_50'].iloc[-1] if not indicators['ema_50'].empty else 0
+            sma_200 = indicators['sma_200'].iloc[-1] if not indicators['sma_200'].empty else 0
             
-            # Get current values
-            close = indicators['close'][current_idx]
-            ma_short = indicators['ma_short'][current_idx]
-            ma_long = indicators['ma_long'][current_idx]
-            rsi = indicators['rsi'][current_idx]
-            bb_upper = indicators['bb_upper'][current_idx]
-            bb_lower = indicators['bb_lower'][current_idx]
-            macd_line = indicators['macd_line'][current_idx]
-            macd_signal = indicators['macd_signal'][current_idx]
+            # Trend direction
+            short_trend = 'up' if ema_20 > ema_50 else 'down'
+            long_trend = 'up' if current_price > sma_200 else 'down'
             
-            # Check for valid values
-            if any(np.isnan([close, ma_short, ma_long, rsi, bb_upper, bb_lower, macd_line, macd_signal])):
-                return None
+            # Trend strength calculation
+            if ema_20 > 0 and ema_50 > 0:
+                trend_strength = abs(ema_20 - ema_50) / ema_50
+            else:
+                trend_strength = 0
             
-            # Bull signal conditions
-            bull_conditions = []
-            
-            # 1. Price above short MA, short MA above long MA
-            if close > ma_short > ma_long:
-                bull_conditions.append(0.2)
-            
-            # 2. RSI oversold recovery (30-50 range)
-            if 30 < rsi < 50:
-                bull_conditions.append(0.15)
-            
-            # 3. Price near lower Bollinger Band (oversold)
-            bb_position = (close - bb_lower) / (bb_upper - bb_lower)
-            if bb_position < 0.3:
-                bull_conditions.append(0.2)
-            
-            # 4. MACD bullish crossover
-            if (len(indicators['macd_line']) > 1 and 
-                macd_line > macd_signal and 
-                indicators['macd_line'][-2] <= indicators['macd_signal'][-2]):
-                bull_conditions.append(0.25)
-            
-            # 5. Price at support level
-            support_levels = indicators.get('support_resistance', {}).get('support', [])
-            if support_levels and any(abs(close - level) / close < 0.002 for level in support_levels):
-                bull_conditions.append(0.2)
-            
-            # Bear signal conditions
-            bear_conditions = []
-            
-            # 1. Price below short MA, short MA below long MA
-            if close < ma_short < ma_long:
-                bear_conditions.append(0.2)
-            
-            # 2. RSI overbought correction (50-70 range)
-            if 50 < rsi < 70:
-                bear_conditions.append(0.15)
-            
-            # 3. Price near upper Bollinger Band (overbought)
-            if bb_position > 0.7:
-                bear_conditions.append(0.2)
-            
-            # 4. MACD bearish crossover
-            if (len(indicators['macd_line']) > 1 and 
-                macd_line < macd_signal and 
-                indicators['macd_line'][-2] >= indicators['macd_signal'][-2]):
-                bear_conditions.append(0.25)
-            
-            # 5. Price at resistance level
-            resistance_levels = indicators.get('support_resistance', {}).get('resistance', [])
-            if resistance_levels and any(abs(close - level) / close < 0.002 for level in resistance_levels):
-                bear_conditions.append(0.2)
-            
-            # Calculate confidence scores
-            bull_confidence = sum(bull_conditions)
-            bear_confidence = sum(bear_conditions)
-            
-            # Determine action
-            if bull_confidence > bear_confidence and bull_confidence >= self.min_confidence:
-                action = 'buy'
-                confidence = bull_confidence
-            elif bear_confidence > bull_confidence and bear_confidence >= self.min_confidence:
-                action = 'sell'
-                confidence = bear_confidence
-            
-            # Additional safety check - avoid signals during high volatility
-            if len(data) >= 20:
-                recent_volatility = data['close'].tail(20).std() / data['close'].tail(20).mean()
-                if recent_volatility > 0.02:  # 2% volatility threshold
-                    confidence *= 0.8  # Reduce confidence during high volatility
-            
-            if confidence < self.min_confidence:
-                action = 'hold'
+            # Price position relative to EMAs
+            price_above_ema20 = current_price > ema_20
+            price_above_ema50 = current_price > ema_50
+            price_above_sma200 = current_price > sma_200
             
             return {
-                'action': action,
-                'confidence': min(confidence, 1.0),
-                'indicators': {
-                    'rsi': rsi,
-                    'ma_trend': 'up' if ma_short > ma_long else 'down',
-                    'bb_position': bb_position,
-                    'macd_signal': 'bull' if macd_line > macd_signal else 'bear'
-                },
-                'strategy': 'swing',
-                'timeframe': self.timeframe
+                'short_trend': short_trend,
+                'long_trend': long_trend,
+                'trend_strength': trend_strength,
+                'price_above_ema20': price_above_ema20,
+                'price_above_ema50': price_above_ema50,
+                'price_above_sma200': price_above_sma200,
+                'trend_aligned': short_trend == long_trend
             }
             
         except Exception as e:
-            self.logger.error(f"Error generating swing signal: {e}")
-            return None
+            self.logger.error(f"Error analyzing trend: {e}")
+            return {}
 
-    def _find_support_resistance(self, high: np.ndarray, low: np.ndarray, close: np.ndarray) -> Dict[str, List[float]]:
-        """Find support and resistance levels"""
+    def _evaluate_signal(self, df: pd.DataFrame, indicators: Dict, trend_analysis: Dict) -> Dict[str, Any]:
+        """Evaluate swing trading signal"""
         try:
-            if len(close) < 20:
-                return {'support': [], 'resistance': []}
+            current_price = df['close'].iloc[-1]
             
-            # Look for pivot points in last 20 periods
-            lookback = min(20, len(close))
-            recent_high = high[-lookback:]
-            recent_low = low[-lookback:]
-            recent_close = close[-lookback:]
+            # Get latest indicator values
+            rsi = indicators['rsi'].iloc[-1] if not indicators['rsi'].empty else 50
+            macd = indicators['macd'].iloc[-1] if not indicators['macd'].empty else 0
+            macd_signal = indicators['macd_signal'].iloc[-1] if not indicators['macd_signal'].empty else 0
+            macd_histogram = indicators['macd_histogram'].iloc[-1] if not indicators['macd_histogram'].empty else 0
             
-            support_levels = []
-            resistance_levels = []
+            bb_upper = indicators['bb_upper'].iloc[-1] if not indicators['bb_upper'].empty else current_price
+            bb_lower = indicators['bb_lower'].iloc[-1] if not indicators['bb_lower'].empty else current_price
             
-            # Find local minima for support
-            for i in range(2, len(recent_low) - 2):
-                if (recent_low[i] < recent_low[i-1] and recent_low[i] < recent_low[i-2] and
-                    recent_low[i] < recent_low[i+1] and recent_low[i] < recent_low[i+2]):
-                    support_levels.append(recent_low[i])
+            # Initialize signal
+            signal = {'action': 'HOLD', 'confidence': 0, 'reason': 'No clear signal'}
             
-            # Find local maxima for resistance
-            for i in range(2, len(recent_high) - 2):
-                if (recent_high[i] > recent_high[i-1] and recent_high[i] > recent_high[i-2] and
-                    recent_high[i] > recent_high[i+1] and recent_high[i] > recent_high[i+2]):
-                    resistance_levels.append(recent_high[i])
+            # Check trend strength
+            trend_strength = trend_analysis.get('trend_strength', 0)
+            if trend_strength < self.min_trend_strength:
+                return signal
             
-            # Keep only most relevant levels (closest to current price)
-            current_price = close[-1]
-            support_levels = sorted([s for s in support_levels if s < current_price], reverse=True)[:3]
-            resistance_levels = sorted([r for r in resistance_levels if r > current_price])[:3]
+            # Long signal conditions
+            long_conditions = [
+                trend_analysis.get('short_trend') == 'up',  # Short trend up
+                trend_analysis.get('long_trend') == 'up',   # Long trend up
+                rsi < 70,  # Not overbought
+                macd > macd_signal,  # MACD bullish
+                macd_histogram > 0,  # MACD histogram positive
+                current_price > bb_lower,  # Above BB lower
+                trend_analysis.get('price_above_ema20', False)  # Above EMA20
+            ]
             
-            return {
-                'support': support_levels,
-                'resistance': resistance_levels
-            }
+            # Short signal conditions
+            short_conditions = [
+                trend_analysis.get('short_trend') == 'down',  # Short trend down
+                trend_analysis.get('long_trend') == 'down',   # Long trend down
+                rsi > 30,  # Not oversold
+                macd < macd_signal,  # MACD bearish
+                macd_histogram < 0,  # MACD histogram negative
+                current_price < bb_upper,  # Below BB upper
+                not trend_analysis.get('price_above_ema20', True)  # Below EMA20
+            ]
+            
+            # Calculate confidence
+            long_score = sum(long_conditions) / len(long_conditions)
+            short_score = sum(short_conditions) / len(short_conditions)
+            
+            # Determine signal
+            if long_score >= 0.7 and long_score > short_score:
+                signal = {
+                    'action': 'BUY',
+                    'confidence': long_score,
+                    'entry_price': current_price,
+                    'reason': f'Swing long signal (score: {long_score:.2f})',
+                    'timeframe': self.timeframe,
+                    'strategy': self.name
+                }
+            elif short_score >= 0.7 and short_score > long_score:
+                signal = {
+                    'action': 'SELL',
+                    'confidence': short_score,
+                    'entry_price': current_price,
+                    'reason': f'Swing short signal (score: {short_score:.2f})',
+                    'timeframe': self.timeframe,
+                    'strategy': self.name
+                }
+            
+            return signal
             
         except Exception as e:
-            self.logger.error(f"Error finding support/resistance: {e}")
-            return {'support': [], 'resistance': []}
+            self.logger.error(f"Error evaluating swing signal: {e}")
+            return {'action': 'HOLD', 'confidence': 0, 'reason': f'Evaluation error: {str(e)}'}
 
-    def _sma(self, data: np.ndarray, period: int) -> np.ndarray:
-        """Simple Moving Average"""
+    def _find_support_resistance(self, df: pd.DataFrame, level_type: str) -> float:
+        """Find support/resistance levels"""
         try:
-            sma = np.full(len(data), np.nan)
-            for i in range(period - 1, len(data)):
-                sma[i] = np.mean(data[i - period + 1:i + 1])
-            return sma
-        except:
-            return np.full(len(data), np.nan)
-
-    def _ema(self, data: np.ndarray, period: int) -> np.ndarray:
-        """Exponential Moving Average"""
-        try:
-            ema = np.full(len(data), np.nan)
-            multiplier = 2 / (period + 1)
+            if len(df) < 20:
+                return 0.0
             
-            # Start with SMA for first value
-            ema[period - 1] = np.mean(data[:period])
+            # Use recent 20 candles for swing points
+            recent_df = df.tail(20)
             
-            for i in range(period, len(data)):
-                ema[i] = (data[i] * multiplier) + (ema[i - 1] * (1 - multiplier))
-            
-            return ema
-        except:
-            return np.full(len(data), np.nan)
-
-    def _rsi(self, data: np.ndarray, period: int) -> np.ndarray:
-        """Relative Strength Index"""
-        try:
-            rsi = np.full(len(data), np.nan)
-            deltas = np.diff(data)
-            
-            gains = np.where(deltas > 0, deltas, 0)
-            losses = np.where(deltas < 0, -deltas, 0)
-            
-            avg_gain = np.mean(gains[:period])
-            avg_loss = np.mean(losses[:period])
-            
-            for i in range(period, len(data)):
-                if avg_loss != 0:
-                    rs = avg_gain / avg_loss
-                    rsi[i] = 100 - (100 / (1 + rs))
-                else:
-                    rsi[i] = 100
+            if level_type == 'support':
+                # Find lowest low in recent data
+                return recent_df['low'].min()
+            else:  # resistance
+                # Find highest high in recent data
+                return recent_df['high'].max()
                 
-                # Update averages
-                if i < len(deltas):
-                    gain = gains[i] if i < len(gains) else 0
-                    loss = losses[i] if i < len(losses) else 0
-                    avg_gain = ((avg_gain * (period - 1)) + gain) / period
-                    avg_loss = ((avg_loss * (period - 1)) + loss) / period
-            
-            return rsi
-        except:
-            return np.full(len(data), np.nan)
+        except Exception as e:
+            self.logger.error(f"Error finding {level_type}: {e}")
+            return 0.0
 
-    def _rolling_std(self, data: np.ndarray, period: int) -> np.ndarray:
-        """Rolling standard deviation"""
-        try:
-            std = np.full(len(data), np.nan)
-            for i in range(period - 1, len(data)):
-                std[i] = np.std(data[i - period + 1:i + 1])
-            return std
-        except:
-            return np.full(len(data), np.nan)
+    def get_strategy_info(self) -> Dict[str, Any]:
+        """Get strategy information"""
+        return {
+            'name': self.name,
+            'type': 'Swing Trading',
+            'timeframe': self.timeframe,
+            'risk_level': 'Medium',
+            'hold_duration': '1-7 days',
+            'description': 'Medium-term trend following strategy using H4 timeframe'
+        }

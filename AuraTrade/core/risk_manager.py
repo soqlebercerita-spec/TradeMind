@@ -10,249 +10,254 @@ from core.mt5_connector import MT5Connector
 from utils.logger import Logger
 
 class RiskManager:
-    """Conservative risk management for high win rate trading"""
+    """Advanced risk management system"""
 
     def __init__(self, mt5_connector: MT5Connector):
         self.logger = Logger().get_logger()
-        self.mt5_connector = mt5_connector
+        self.mt5 = mt5_connector
         
         # Risk parameters
-        self.max_risk_per_trade = 2.0  # 2% per trade
-        self.max_daily_risk = 6.0      # 6% daily risk
-        self.max_drawdown = 10.0       # 10% max drawdown
-        self.max_positions = 5         # Max concurrent positions
-        self.max_symbol_exposure = 3.0 # Max 3% per symbol
+        self.max_risk_per_trade = 0.02  # 2% per trade
+        self.max_daily_risk = 0.05      # 5% daily
+        self.max_drawdown = 0.10        # 10% max drawdown
+        self.max_exposure = 0.20        # 20% max exposure
         
-        # Daily tracking
-        self.daily_pnl = 0.0
+        # Tracking
+        self.daily_risk_used = 0.0
+        self.current_exposure = 0.0
         self.daily_trades = 0
-        self.last_reset_date = datetime.now().date()
+        self.daily_losses = 0
+        self.consecutive_losses = 0
         
-        # Risk metrics
-        self.current_drawdown = 0.0
-        self.peak_equity = 0.0
+        # Emergency stops
+        self.emergency_stop = False
+        self.max_consecutive_losses = 5
         
-        self.logger.info("RiskManager initialized with conservative parameters")
+        self.logger.info("RiskManager initialized")
 
-    def validate_order(self, symbol: str, volume: float) -> bool:
-        """Validate if order meets risk criteria"""
+    def can_open_position(self, symbol: str, volume: float) -> bool:
+        """Check if position can be opened based on risk rules"""
         try:
-            # Check daily reset
-            self._check_daily_reset()
+            # Emergency stop check
+            if self.emergency_stop:
+                self.logger.warning("Emergency stop active - no new positions")
+                return False
             
             # Get account info
-            account_info = self.mt5_connector.get_account_info()
-            if not account_info:
-                self.logger.warning("Cannot get account info for risk validation")
-                return False
-
-            balance = account_info.get('balance', 0)
-            equity = account_info.get('equity', 0)
-            
-            # Update peak equity and drawdown
-            if equity > self.peak_equity:
-                self.peak_equity = equity
-            
-            self.current_drawdown = ((self.peak_equity - equity) / self.peak_equity) * 100
-            
-            # Check maximum drawdown
-            if self.current_drawdown > self.max_drawdown:
-                self.logger.warning(f"Max drawdown exceeded: {self.current_drawdown:.2f}%")
+            account = self.mt5.get_account_info()
+            if not account:
                 return False
             
-            # Check daily risk limit
-            if abs(self.daily_pnl) > (balance * self.max_daily_risk / 100):
-                self.logger.warning(f"Daily risk limit exceeded: {self.daily_pnl:.2f}")
-                return False
+            balance = account.get('balance', 0)
+            equity = account.get('equity', 0)
             
-            # Check maximum positions
-            positions = self.mt5_connector.get_positions()
-            if len(positions) >= self.max_positions:
-                self.logger.warning(f"Maximum positions limit reached: {len(positions)}")
-                return False
-            
-            # Check symbol exposure
-            symbol_exposure = self._calculate_symbol_exposure(symbol, volume, balance)
-            if symbol_exposure > self.max_symbol_exposure:
-                self.logger.warning(f"Symbol exposure limit exceeded: {symbol_exposure:.2f}%")
-                return False
-            
-            # Check trade size risk
-            symbol_info = self.mt5_connector.get_symbol_info(symbol)
-            if symbol_info:
-                contract_size = symbol_info.get('trade_contract_size', 100000)
-                trade_value = volume * contract_size
-                trade_risk = (trade_value / balance) * 100
-                
-                if trade_risk > self.max_risk_per_trade:
-                    self.logger.warning(f"Trade risk too high: {trade_risk:.2f}%")
+            # Check drawdown
+            if balance > 0:
+                current_drawdown = (balance - equity) / balance
+                if current_drawdown > self.max_drawdown:
+                    self.logger.warning(f"Max drawdown exceeded: {current_drawdown:.2%}")
                     return False
             
-            self.logger.info(f"Order validated: {symbol} {volume} lots")
+            # Calculate position risk
+            symbol_info = self.mt5.get_symbol_info(symbol)
+            if not symbol_info:
+                return False
+            
+            # Estimate position value
+            position_value = volume * symbol_info.get('trade_contract_size', 100000)
+            position_risk = position_value * self.max_risk_per_trade
+            
+            # Check daily risk limit
+            if self.daily_risk_used + position_risk > balance * self.max_daily_risk:
+                self.logger.warning("Daily risk limit would be exceeded")
+                return False
+            
+            # Check exposure limit
+            if self.current_exposure + position_value > balance * self.max_exposure:
+                self.logger.warning("Exposure limit would be exceeded")
+                return False
+            
+            # Check consecutive losses
+            if self.consecutive_losses >= self.max_consecutive_losses:
+                self.logger.warning("Too many consecutive losses - trading paused")
+                return False
+            
             return True
             
         except Exception as e:
-            self.logger.error(f"Error validating order: {e}")
+            self.logger.error(f"Error checking position risk: {e}")
             return False
 
-    def calculate_position_size(self, symbol: str, risk_pct: float = None) -> float:
+    def calculate_position_size(self, symbol: str, entry_price: float, 
+                              stop_loss: float, risk_amount: float = None) -> float:
         """Calculate optimal position size based on risk"""
         try:
-            if risk_pct is None:
-                risk_pct = self.max_risk_per_trade
+            # Get account info
+            account = self.mt5.get_account_info()
+            if not account:
+                return 0.0
             
-            account_info = self.mt5_connector.get_account_info()
-            if not account_info:
-                return 0.01  # Minimum lot
+            balance = account.get('balance', 0)
+            if balance <= 0:
+                return 0.0
             
-            balance = account_info.get('balance', 0)
-            risk_amount = balance * (risk_pct / 100)
-            
-            # Get symbol info
-            symbol_info = self.mt5_connector.get_symbol_info(symbol)
-            if not symbol_info:
-                return 0.01
-            
-            contract_size = symbol_info.get('trade_contract_size', 100000)
-            tick_value = symbol_info.get('trade_tick_value', 1)
-            
-            # Calculate position size (conservative approach)
-            # Assume 50 pip stop loss for calculation
-            pip_value = tick_value * 10  # Approximate pip value
-            stop_loss_pips = 50
-            
-            position_size = risk_amount / (stop_loss_pips * pip_value)
-            
-            # Round to valid lot size (0.01 increments)
-            position_size = round(position_size / 0.01) * 0.01
-            
-            # Apply limits
-            min_lot = 0.01
-            max_lot = min(1.0, balance / 10000)  # Conservative max lot
-            
-            position_size = max(min_lot, min(position_size, max_lot))
-            
-            self.logger.info(f"Calculated position size for {symbol}: {position_size}")
-            return position_size
-            
-        except Exception as e:
-            self.logger.error(f"Error calculating position size: {e}")
-            return 0.01
-
-    def update_daily_pnl(self, pnl: float) -> None:
-        """Update daily P&L tracking"""
-        try:
-            self._check_daily_reset()
-            self.daily_pnl += pnl
-            self.daily_trades += 1
-            
-            self.logger.info(f"Daily P&L updated: ${self.daily_pnl:.2f}, Trades: {self.daily_trades}")
-            
-        except Exception as e:
-            self.logger.error(f"Error updating daily P&L: {e}")
-
-    def should_stop_trading(self) -> bool:
-        """Check if trading should be stopped due to risk limits"""
-        try:
-            # Check daily reset
-            self._check_daily_reset()
-            
-            # Check drawdown limit
-            if self.current_drawdown > self.max_drawdown:
-                self.logger.warning("Trading stopped: Maximum drawdown exceeded")
-                return True
-            
-            # Check daily loss limit
-            account_info = self.mt5_connector.get_account_info()
-            if account_info:
-                balance = account_info.get('balance', 0)
-                daily_loss_limit = balance * (self.max_daily_risk / 100)
-                
-                if self.daily_pnl < -daily_loss_limit:
-                    self.logger.warning("Trading stopped: Daily loss limit exceeded")
-                    return True
-            
-            return False
-            
-        except Exception as e:
-            self.logger.error(f"Error checking stop trading condition: {e}")
-            return False
-
-    def get_risk_metrics(self) -> Dict[str, Any]:
-        """Get current risk metrics"""
-        try:
-            account_info = self.mt5_connector.get_account_info()
-            positions = self.mt5_connector.get_positions()
-            
-            total_exposure = 0.0
-            if account_info and positions:
-                balance = account_info.get('balance', 0)
-                for pos in positions:
-                    total_exposure += abs(pos.get('profit', 0))
-            
-            return {
-                'current_drawdown': self.current_drawdown,
-                'daily_pnl': self.daily_pnl,
-                'daily_trades': self.daily_trades,
-                'active_positions': len(positions),
-                'total_exposure': total_exposure,
-                'max_drawdown': self.max_drawdown,
-                'max_daily_risk': self.max_daily_risk,
-                'max_positions': self.max_positions
-            }
-            
-        except Exception as e:
-            self.logger.error(f"Error getting risk metrics: {e}")
-            return {}
-
-    def _check_daily_reset(self) -> None:
-        """Reset daily counters if new day"""
-        current_date = datetime.now().date()
-        if current_date != self.last_reset_date:
-            self.daily_pnl = 0.0
-            self.daily_trades = 0
-            self.last_reset_date = current_date
-            self.logger.info("Daily risk counters reset")
-
-    def _calculate_symbol_exposure(self, symbol: str, volume: float, balance: float) -> float:
-        """Calculate exposure percentage for symbol"""
-        try:
-            # Get existing exposure
-            positions = self.mt5_connector.get_positions()
-            existing_volume = sum(pos['volume'] for pos in positions if pos['symbol'] == symbol)
+            # Use default risk if not specified
+            if risk_amount is None:
+                risk_amount = balance * self.max_risk_per_trade
             
             # Get symbol info
-            symbol_info = self.mt5_connector.get_symbol_info(symbol)
+            symbol_info = self.mt5.get_symbol_info(symbol)
             if not symbol_info:
                 return 0.0
             
-            contract_size = symbol_info.get('trade_contract_size', 100000)
-            current_price = symbol_info.get('bid', 1.0)
+            # Calculate pip value
+            pip_size = symbol_info.get('point', 0.0001)
+            tick_value = symbol_info.get('trade_tick_value', 1.0)
             
-            # Calculate total exposure
-            total_volume = existing_volume + volume
-            total_value = total_volume * contract_size * current_price
+            # Calculate distance to stop loss
+            if stop_loss <= 0 or entry_price <= 0:
+                return 0.0
             
-            exposure_pct = (total_value / balance) * 100 if balance > 0 else 0
-            return exposure_pct
+            sl_distance = abs(entry_price - stop_loss)
+            if sl_distance <= 0:
+                return 0.0
+            
+            # Calculate position size
+            pip_distance = sl_distance / pip_size
+            risk_per_pip = tick_value
+            
+            if pip_distance > 0 and risk_per_pip > 0:
+                position_size = risk_amount / (pip_distance * risk_per_pip)
+                
+                # Apply minimum and maximum limits
+                min_lot = symbol_info.get('volume_min', 0.01)
+                max_lot = min(symbol_info.get('volume_max', 100.0), 10.0)  # Cap at 10 lots
+                
+                position_size = max(min_lot, min(position_size, max_lot))
+                
+                # Round to lot step
+                lot_step = symbol_info.get('volume_step', 0.01)
+                position_size = round(position_size / lot_step) * lot_step
+                
+                return position_size
+            
+            return 0.0
             
         except Exception as e:
-            self.logger.error(f"Error calculating symbol exposure: {e}")
+            self.logger.error(f"Error calculating position size: {e}")
             return 0.0
 
-    def set_risk_parameters(self, max_risk_per_trade: float = None, 
-                           max_daily_risk: float = None, 
-                           max_drawdown: float = None) -> None:
-        """Update risk parameters"""
+    def calculate_sl_tp(self, symbol: str, order_type: str, entry_price: float, 
+                       balance: float) -> Dict[str, float]:
+        """Calculate SL and TP based on percentage of balance"""
         try:
-            if max_risk_per_trade is not None:
-                self.max_risk_per_trade = max_risk_per_trade
-            if max_daily_risk is not None:
-                self.max_daily_risk = max_daily_risk
-            if max_drawdown is not None:
-                self.max_drawdown = max_drawdown
+            # Risk per trade (2% of balance)
+            risk_amount = balance * self.max_risk_per_trade
+            
+            # Reward ratio (1:2 risk-reward)
+            reward_amount = risk_amount * 2.0
+            
+            # Get symbol info
+            symbol_info = self.mt5.get_symbol_info(symbol)
+            if not symbol_info:
+                return {'sl': 0.0, 'tp': 0.0}
+            
+            pip_value = symbol_info.get('trade_tick_value', 1.0)
+            pip_size = symbol_info.get('point', 0.0001)
+            
+            # Calculate pip distance for risk amount
+            if pip_value > 0:
+                risk_pips = risk_amount / pip_value
+                reward_pips = reward_amount / pip_value
                 
-            self.logger.info(f"Risk parameters updated: Risk/Trade: {self.max_risk_per_trade}%, Daily: {self.max_daily_risk}%, Drawdown: {self.max_drawdown}%")
+                if order_type.upper() == 'BUY':
+                    sl = entry_price - (risk_pips * pip_size)
+                    tp = entry_price + (reward_pips * pip_size)
+                else:  # SELL
+                    sl = entry_price + (risk_pips * pip_size)
+                    tp = entry_price - (reward_pips * pip_size)
+                
+                return {
+                    'sl': round(sl, symbol_info.get('digits', 5)),
+                    'tp': round(tp, symbol_info.get('digits', 5))
+                }
+            
+            return {'sl': 0.0, 'tp': 0.0}
             
         except Exception as e:
-            self.logger.error(f"Error setting risk parameters: {e}")
+            self.logger.error(f"Error calculating SL/TP: {e}")
+            return {'sl': 0.0, 'tp': 0.0}
+
+    def update_risk_metrics(self, trade_result: Dict[str, Any]):
+        """Update risk metrics after trade"""
+        try:
+            profit = trade_result.get('profit', 0)
+            
+            # Update daily metrics
+            self.daily_trades += 1
+            
+            if profit < 0:
+                self.daily_losses += 1
+                self.consecutive_losses += 1
+                self.daily_risk_used += abs(profit)
+            else:
+                self.consecutive_losses = 0
+            
+            # Check for emergency stop conditions
+            if self.consecutive_losses >= self.max_consecutive_losses:
+                self.emergency_stop = True
+                self.logger.warning("Emergency stop activated due to consecutive losses")
+            
+            # Update exposure
+            self._update_exposure()
+            
+        except Exception as e:
+            self.logger.error(f"Error updating risk metrics: {e}")
+
+    def get_risk_status(self) -> Dict[str, Any]:
+        """Get current risk status"""
+        try:
+            account = self.mt5.get_account_info()
+            balance = account.get('balance', 0) if account else 0
+            
+            return {
+                'emergency_stop': self.emergency_stop,
+                'daily_risk_used': self.daily_risk_used,
+                'daily_risk_limit': balance * self.max_daily_risk,
+                'current_exposure': self.current_exposure,
+                'max_exposure': balance * self.max_exposure,
+                'consecutive_losses': self.consecutive_losses,
+                'max_consecutive_losses': self.max_consecutive_losses,
+                'daily_trades': self.daily_trades,
+                'daily_losses': self.daily_losses
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Error getting risk status: {e}")
+            return {}
+
+    def reset_daily_limits(self):
+        """Reset daily risk limits"""
+        self.daily_risk_used = 0.0
+        self.daily_trades = 0
+        self.daily_losses = 0
+        self.emergency_stop = False
+        self.logger.info("Daily risk limits reset")
+
+    def _update_exposure(self):
+        """Update current exposure calculation"""
+        try:
+            positions = self.mt5.get_positions()
+            total_exposure = 0
+            
+            for pos in positions:
+                symbol_info = self.mt5.get_symbol_info(pos['symbol'])
+                if symbol_info:
+                    contract_size = symbol_info.get('trade_contract_size', 100000)
+                    exposure = pos['volume'] * contract_size
+                    total_exposure += exposure
+            
+            self.current_exposure = total_exposure
+            
+        except Exception as e:
+            self.logger.error(f"Error updating exposure: {e}")

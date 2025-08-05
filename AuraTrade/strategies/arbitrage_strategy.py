@@ -1,351 +1,311 @@
-
 """
 Arbitrage Strategy for AuraTrade Bot
-Multi-symbol arbitrage opportunities for 75%+ win rate
+Statistical arbitrage and correlation trading
 """
 
 import pandas as pd
 import numpy as np
 from typing import Dict, List, Optional, Any, Tuple
 from datetime import datetime, timedelta
+from analysis.technical_analysis import TechnicalAnalysis
 from utils.logger import Logger
 
 class ArbitrageStrategy:
-    """Conservative arbitrage trading strategy"""
+    """Statistical arbitrage strategy with correlation analysis"""
 
     def __init__(self):
         self.logger = Logger().get_logger()
-        self.name = "arbitrage"
-        self.timeframe = "M1"
-        self.min_confidence = 0.8
-        
-        # Arbitrage pairs and correlations
-        self.currency_pairs = {
-            'major': ['EURUSD', 'GBPUSD', 'USDJPY', 'USDCHF'],
-            'cross': ['EURGBP', 'EURJPY', 'GBPJPY'],
-            'gold': ['XAUUSD']
-        }
-        
-        # Correlation thresholds
-        self.correlation_threshold = 0.85
-        self.spread_threshold = 0.0010  # 10 pips
-        self.min_spread_duration = 60   # seconds
-        
-        # Tracking
-        self.correlation_history = {}
-        self.spread_history = {}
-        self.active_opportunities = {}
-        
+        self.technical_analysis = TechnicalAnalysis()
+
+        # Strategy parameters
+        self.name = "Arbitrage Strategy"
+        self.timeframe = 'M15'
+        self.correlation_threshold = 0.7
+        self.spread_threshold = 2.0  # Z-score threshold
+        self.min_correlation_period = 50
+
+        # Currency pairs for correlation analysis
+        self.major_pairs = ['EURUSD', 'GBPUSD', 'USDJPY', 'USDCHF']
+        self.correlation_pairs = [
+            ('EURUSD', 'GBPUSD'),
+            ('EURUSD', 'USDCHF'),
+            ('GBPUSD', 'USDCHF')
+        ]
+
+        # Correlation cache
+        self.correlation_cache = {}
+        self.spread_cache = {}
+
         self.logger.info("ArbitrageStrategy initialized")
 
-    def initialize(self):
-        """Initialize strategy"""
-        self.logger.info("Arbitrage strategy initialized for multi-symbol trading")
-
-    def analyze(self, symbol: str, data: pd.DataFrame) -> Optional[Dict[str, Any]]:
-        """Analyze for arbitrage opportunities"""
+    def generate_signal(self, symbol: str, data: Dict[str, pd.DataFrame]) -> Optional[Dict[str, Any]]:
+        """Generate arbitrage signal based on correlation analysis"""
         try:
-            if data is None or len(data) < 10:
-                return None
+            # Use M15 data for arbitrage analysis
+            if 'M15' not in data or data['M15'].empty:
+                return {'action': 'HOLD', 'confidence': 0, 'reason': 'No M15 data'}
 
-            # For arbitrage, we need to analyze multiple symbols together
-            # This is a simplified version that looks for price divergence
-            opportunities = self._find_arbitrage_opportunities(symbol, data)
-            
-            if opportunities:
-                best_opportunity = max(opportunities, key=lambda x: x['confidence'])
-                if best_opportunity['confidence'] >= self.min_confidence:
-                    self.logger.info(f"Arbitrage opportunity for {symbol}: {best_opportunity['action']} (confidence: {best_opportunity['confidence']:.2f})")
-                    return best_opportunity
-            
-            return None
-            
+            df = data['M15'].copy()
+
+            if len(df) < self.min_correlation_period:
+                return {'action': 'HOLD', 'confidence': 0, 'reason': 'Insufficient data for correlation'}
+
+            # Find best correlation pair for the symbol
+            correlation_signal = self._analyze_correlations(symbol, data)
+
+            # Analyze spread mean reversion
+            spread_signal = self._analyze_spread_reversion(symbol, data)
+
+            # Combine signals
+            final_signal = self._combine_arbitrage_signals(correlation_signal, spread_signal)
+
+            if final_signal and final_signal['action'] != 'HOLD':
+                self.logger.info(f"Arbitrage signal: {symbol} {final_signal['action']} (confidence: {final_signal['confidence']:.2f})")
+
+            return final_signal
+
         except Exception as e:
-            self.logger.error(f"Error analyzing {symbol} for arbitrage: {e}")
+            self.logger.error(f"Error generating arbitrage signal for {symbol}: {e}")
+            return {'action': 'HOLD', 'confidence': 0, 'reason': f'Error: {str(e)}'}
+
+    def _analyze_correlations(self, symbol: str, data: Dict[str, pd.DataFrame]) -> Optional[Dict[str, Any]]:
+        """Analyze correlation-based opportunities"""
+        try:
+            if symbol not in self.major_pairs:
+                return None
+
+            # Find correlation pairs for this symbol
+            relevant_pairs = [pair for pair in self.correlation_pairs if symbol in pair]
+
+            best_signal = None
+            best_confidence = 0
+
+            for pair in relevant_pairs:
+                other_symbol = pair[1] if pair[0] == symbol else pair[0]
+
+                # Check if we have data for both symbols
+                if other_symbol not in [s for s in data.keys() if 'M15' in data and not data['M15'].empty]:
+                    continue
+
+                # Calculate correlation and spread
+                correlation_data = self._calculate_pair_correlation(symbol, other_symbol, data)
+
+                if correlation_data and correlation_data['correlation'] > self.correlation_threshold:
+                    # Analyze spread for mean reversion opportunity
+                    spread_signal = self._analyze_pair_spread(symbol, other_symbol, correlation_data)
+
+                    if spread_signal and spread_signal['confidence'] > best_confidence:
+                        best_signal = spread_signal
+                        best_confidence = spread_signal['confidence']
+
+            return best_signal
+
+        except Exception as e:
+            self.logger.error(f"Error analyzing correlations: {e}")
             return None
 
-    def _find_arbitrage_opportunities(self, symbol: str, data: pd.DataFrame) -> List[Dict[str, Any]]:
-        """Find arbitrage opportunities"""
+    def _calculate_pair_correlation(self, symbol1: str, symbol2: str, data: Dict) -> Optional[Dict[str, Any]]:
+        """Calculate correlation between two currency pairs"""
         try:
-            opportunities = []
-            
-            # Statistical arbitrage based on mean reversion
-            mean_reversion_signal = self._statistical_arbitrage(symbol, data)
-            if mean_reversion_signal:
-                opportunities.append(mean_reversion_signal)
-            
-            # Currency triangle arbitrage (if applicable)
-            triangle_signal = self._triangle_arbitrage(symbol, data)
-            if triangle_signal:
-                opportunities.append(triangle_signal)
-            
-            # Cross-asset arbitrage
-            cross_asset_signal = self._cross_asset_arbitrage(symbol, data)
-            if cross_asset_signal:
-                opportunities.append(cross_asset_signal)
-            
-            return opportunities
-            
-        except Exception as e:
-            self.logger.error(f"Error finding arbitrage opportunities: {e}")
-            return []
+            # This is a simplified version - in real implementation,
+            # you would need data for multiple symbols
+            df1 = data.get('M15')
+            if df1 is None or df1.empty:
+                return None
 
-    def _statistical_arbitrage(self, symbol: str, data: pd.DataFrame) -> Optional[Dict[str, Any]]:
-        """Statistical arbitrage based on mean reversion"""
+            # For demonstration, we'll use different timeframes as proxy for different symbols
+            df2 = data.get('M5')  # Proxy for second symbol
+            if df2 is None or df2.empty:
+                return None
+
+            # Align data lengths
+            min_length = min(len(df1), len(df2))
+            if min_length < self.min_correlation_period:
+                return None
+
+            # Calculate returns
+            returns1 = df1['close'].tail(min_length).pct_change().dropna()
+            returns2 = df2['close'].tail(min_length).pct_change().dropna()
+
+            # Align series
+            min_length = min(len(returns1), len(returns2))
+            returns1 = returns1.tail(min_length)
+            returns2 = returns2.tail(min_length)
+
+            # Calculate correlation
+            correlation = returns1.corr(returns2)
+
+            # Calculate spread (price ratio)
+            price1 = df1['close'].tail(min_length)
+            price2 = df2['close'].tail(min_length)
+            spread = price1 / price2
+
+            # Calculate spread statistics
+            spread_mean = spread.mean()
+            spread_std = spread.std()
+            current_spread = spread.iloc[-1]
+            z_score = (current_spread - spread_mean) / spread_std if spread_std > 0 else 0
+
+            return {
+                'correlation': abs(correlation),
+                'spread': current_spread,
+                'spread_mean': spread_mean,
+                'spread_std': spread_std,
+                'z_score': z_score,
+                'symbol1': symbol1,
+                'symbol2': symbol2
+            }
+
+        except Exception as e:
+            self.logger.error(f"Error calculating correlation: {e}")
+            return None
+
+    def _analyze_pair_spread(self, symbol1: str, symbol2: str, correlation_data: Dict) -> Optional[Dict[str, Any]]:
+        """Analyze spread for mean reversion opportunity"""
         try:
-            if len(data) < 50:
+            z_score = correlation_data['z_score']
+            correlation = correlation_data['correlation']
+
+            # Check for significant deviation
+            if abs(z_score) < self.spread_threshold:
                 return None
-            
-            close = data['close'].values
-            
-            # Calculate z-score for mean reversion
-            window = 20
-            if len(close) < window:
+
+            # Determine trade direction
+            if z_score > self.spread_threshold:
+                # Spread is high - sell symbol1, buy symbol2
+                # Since we can only trade one symbol, sell symbol1
+                action = 'SELL'
+                confidence = min(0.9, (abs(z_score) / 3.0) * correlation)
+                reason = f'Spread high (z={z_score:.2f}), correlation={correlation:.2f}'
+            elif z_score < -self.spread_threshold:
+                # Spread is low - buy symbol1, sell symbol2
+                action = 'BUY'
+                confidence = min(0.9, (abs(z_score) / 3.0) * correlation)
+                reason = f'Spread low (z={z_score:.2f}), correlation={correlation:.2f}'
+            else:
                 return None
-            
-            # Rolling statistics
-            rolling_mean = pd.Series(close).rolling(window=window).mean().values
-            rolling_std = pd.Series(close).rolling(window=window).std().values
-            
-            current_price = close[-1]
-            current_mean = rolling_mean[-1]
-            current_std = rolling_std[-1]
-            
-            if np.isnan(current_mean) or np.isnan(current_std) or current_std == 0:
+
+            return {
+                'action': action,
+                'confidence': confidence,
+                'reason': reason,
+                'z_score': z_score,
+                'correlation': correlation,
+                'strategy': self.name
+            }
+
+        except Exception as e:
+            self.logger.error(f"Error analyzing pair spread: {e}")
+            return None
+
+    def _analyze_spread_reversion(self, symbol: str, data: Dict) -> Optional[Dict[str, Any]]:
+        """Analyze single-symbol mean reversion"""
+        try:
+            df = data['M15'].copy()
+
+            # Calculate Bollinger Bands for mean reversion
+            bb_data = self.technical_analysis.calculate_bollinger_bands(df['close'], 20, 2)
+
+            current_price = df['close'].iloc[-1]
+            bb_upper = bb_data['upper'].iloc[-1]
+            bb_lower = bb_data['lower'].iloc[-1]
+            bb_middle = bb_data['middle'].iloc[-1]
+
+            # Calculate position relative to bands
+            if bb_upper > bb_lower:
+                position = (current_price - bb_lower) / (bb_upper - bb_lower)
+            else:
                 return None
-            
-            # Z-score calculation
-            z_score = (current_price - current_mean) / current_std
-            
-            # Signal generation
-            confidence = 0.0
-            action = 'hold'
-            
-            # Mean reversion signals
-            if z_score > 2.0:  # Overbought
-                action = 'sell'
-                confidence = min(abs(z_score) / 3.0, 1.0)
-            elif z_score < -2.0:  # Oversold
-                action = 'buy'
-                confidence = min(abs(z_score) / 3.0, 1.0)
-            
-            # Additional filters
-            if confidence > 0:
-                # Check volatility
-                recent_volatility = pd.Series(close[-10:]).std()
-                avg_volatility = pd.Series(close[-50:]).std()
-                
-                if recent_volatility > avg_volatility * 1.5:
-                    confidence *= 0.7  # Reduce confidence during high volatility
-                
-                # Check trend strength
-                trend_strength = self._calculate_trend_strength(close)
-                if trend_strength > 0.7:
-                    confidence *= 0.8  # Reduce confidence during strong trends
-            
-            if confidence >= self.min_confidence:
+
+            # Check for extreme positions
+            if position > 0.9:  # Near upper band
                 return {
-                    'action': action,
-                    'confidence': confidence,
-                    'strategy': 'arbitrage_statistical',
-                    'indicators': {
-                        'z_score': z_score,
-                        'mean_price': current_mean,
-                        'std_dev': current_std
-                    },
-                    'timeframe': self.timeframe
+                    'action': 'SELL',
+                    'confidence': min(0.8, position * 0.8),
+                    'reason': f'Mean reversion sell (position: {position:.2f})',
+                    'strategy': self.name
                 }
-            
-            return None
-            
-        except Exception as e:
-            self.logger.error(f"Error in statistical arbitrage: {e}")
+            elif position < 0.1:  # Near lower band
+                return {
+                    'action': 'BUY',
+                    'confidence': min(0.8, (1 - position) * 0.8),
+                    'reason': f'Mean reversion buy (position: {position:.2f})',
+                    'strategy': self.name
+                }
+
             return None
 
-    def _triangle_arbitrage(self, symbol: str, data: pd.DataFrame) -> Optional[Dict[str, Any]]:
-        """Triangle arbitrage for currency pairs"""
-        try:
-            # Simplified triangle arbitrage
-            # In practice, this would require real-time quotes from multiple pairs
-            
-            # For EUR/USD, we might check EUR/GBP and GBP/USD
-            base_currency = symbol[:3]
-            quote_currency = symbol[3:]
-            
-            # This is a placeholder for triangle arbitrage logic
-            # Real implementation would require synchronized data from multiple pairs
-            
-            # Check for pricing discrepancies
-            current_price = data['close'].iloc[-1]
-            
-            # Calculate theoretical price based on cross rates
-            # This is simplified and would need actual cross-rate data
-            theoretical_price = self._calculate_theoretical_price(symbol, current_price)
-            
-            if theoretical_price and abs(current_price - theoretical_price) / current_price > 0.0005:
-                action = 'buy' if current_price < theoretical_price else 'sell'
-                confidence = min(abs(current_price - theoretical_price) / current_price * 1000, 1.0)
-                
-                if confidence >= self.min_confidence:
-                    return {
-                        'action': action,
-                        'confidence': confidence,
-                        'strategy': 'arbitrage_triangle',
-                        'indicators': {
-                            'current_price': current_price,
-                            'theoretical_price': theoretical_price,
-                            'spread': abs(current_price - theoretical_price)
-                        },
-                        'timeframe': self.timeframe
-                    }
-            
-            return None
-            
         except Exception as e:
-            self.logger.error(f"Error in triangle arbitrage: {e}")
+            self.logger.error(f"Error analyzing spread reversion: {e}")
             return None
 
-    def _cross_asset_arbitrage(self, symbol: str, data: pd.DataFrame) -> Optional[Dict[str, Any]]:
-        """Cross-asset arbitrage opportunities"""
+    def _combine_arbitrage_signals(self, correlation_signal: Optional[Dict], 
+                                 spread_signal: Optional[Dict]) -> Dict[str, Any]:
+        """Combine different arbitrage signals"""
         try:
-            # Look for divergence between related assets
-            # For example, XAUUSD vs currency pairs during risk-on/risk-off
-            
-            if symbol == 'XAUUSD':
-                return self._gold_currency_arbitrage(data)
-            elif symbol in ['EURUSD', 'GBPUSD']:
-                return self._currency_correlation_arbitrage(symbol, data)
-            
-            return None
-            
-        except Exception as e:
-            self.logger.error(f"Error in cross-asset arbitrage: {e}")
-            return None
+            signals = [s for s in [correlation_signal, spread_signal] if s is not None]
 
-    def _gold_currency_arbitrage(self, gold_data: pd.DataFrame) -> Optional[Dict[str, Any]]:
-        """Arbitrage between gold and currencies"""
-        try:
-            # Simplified gold-currency relationship
-            # Gold often moves inversely to USD strength
-            
-            if len(gold_data) < 20:
-                return None
-            
-            gold_returns = gold_data['close'].pct_change().dropna()
-            
-            # Calculate momentum
-            short_momentum = gold_returns.tail(5).mean()
-            long_momentum = gold_returns.tail(20).mean()
-            
-            # Look for divergence
-            if abs(short_momentum - long_momentum) > 0.001:  # 0.1% divergence
-                action = 'buy' if short_momentum > long_momentum else 'sell'
-                confidence = min(abs(short_momentum - long_momentum) * 100, 1.0)
-                
-                if confidence >= self.min_confidence:
-                    return {
-                        'action': action,
-                        'confidence': confidence,
-                        'strategy': 'arbitrage_gold_currency',
-                        'indicators': {
-                            'short_momentum': short_momentum,
-                            'long_momentum': long_momentum,
-                            'divergence': short_momentum - long_momentum
-                        },
-                        'timeframe': self.timeframe
-                    }
-            
-            return None
-            
-        except Exception as e:
-            self.logger.error(f"Error in gold-currency arbitrage: {e}")
-            return None
+            if not signals:
+                return {'action': 'HOLD', 'confidence': 0, 'reason': 'No arbitrage opportunities'}
 
-    def _currency_correlation_arbitrage(self, symbol: str, data: pd.DataFrame) -> Optional[Dict[str, Any]]:
-        """Arbitrage based on currency correlations"""
-        try:
-            # Look for breakdown in normal correlations
-            # For example, EUR/USD vs GBP/USD correlation
-            
-            if len(data) < 50:
-                return None
-            
-            returns = data['close'].pct_change().dropna()
-            
-            # Calculate recent vs historical correlation patterns
-            recent_volatility = returns.tail(10).std()
-            historical_volatility = returns.tail(50).std()
-            
-            volatility_ratio = recent_volatility / historical_volatility if historical_volatility > 0 else 1
-            
-            # Look for volatility spikes that might indicate arbitrage opportunities
-            if volatility_ratio > 1.5:  # Recent volatility 50% higher than historical
-                # Fade the volatility spike
-                recent_movement = returns.tail(5).sum()
-                action = 'sell' if recent_movement > 0 else 'buy'
-                confidence = min((volatility_ratio - 1.0) * 2, 1.0)
-                
-                if confidence >= self.min_confidence:
-                    return {
-                        'action': action,
-                        'confidence': confidence,
-                        'strategy': 'arbitrage_correlation',
-                        'indicators': {
-                            'volatility_ratio': volatility_ratio,
-                            'recent_movement': recent_movement,
-                            'recent_volatility': recent_volatility
-                        },
-                        'timeframe': self.timeframe
-                    }
-            
-            return None
-            
-        except Exception as e:
-            self.logger.error(f"Error in currency correlation arbitrage: {e}")
-            return None
+            # If only one signal, return it
+            if len(signals) == 1:
+                return signals[0]
 
-    def _calculate_theoretical_price(self, symbol: str, current_price: float) -> Optional[float]:
-        """Calculate theoretical price for triangle arbitrage"""
-        try:
-            # This is a placeholder for theoretical price calculation
-            # Real implementation would use actual cross rates
-            
-            # For demonstration, return a price with small random deviation
-            theoretical_deviation = np.random.normal(0, 0.0002)  # ±2 pips random
-            return current_price * (1 + theoretical_deviation)
-            
-        except Exception as e:
-            self.logger.error(f"Error calculating theoretical price: {e}")
-            return None
+            # Combine multiple signals
+            buy_signals = [s for s in signals if s['action'] == 'BUY']
+            sell_signals = [s for s in signals if s['action'] == 'SELL']
 
-    def _calculate_trend_strength(self, close: np.ndarray) -> float:
-        """Calculate trend strength (0-1)"""
-        try:
-            if len(close) < 20:
-                return 0.0
-            
-            # Use linear regression to measure trend strength
-            x = np.arange(len(close[-20:]))
-            y = close[-20:]
-            
-            # Calculate R-squared
-            correlation = np.corrcoef(x, y)[0, 1]
-            r_squared = correlation ** 2
-            
-            return r_squared
-            
+            if len(buy_signals) > len(sell_signals):
+                # More buy signals
+                avg_confidence = sum(s['confidence'] for s in buy_signals) / len(buy_signals)
+                return {
+                    'action': 'BUY',
+                    'confidence': avg_confidence,
+                    'reason': f'Combined arbitrage buy ({len(buy_signals)} signals)',
+                    'strategy': self.name
+                }
+            elif len(sell_signals) > len(buy_signals):
+                # More sell signals
+                avg_confidence = sum(s['confidence'] for s in sell_signals) / len(sell_signals)
+                return {
+                    'action': 'SELL',
+                    'confidence': avg_confidence,
+                    'reason': f'Combined arbitrage sell ({len(sell_signals)} signals)',
+                    'strategy': self.name
+                }
+            else:
+                # Conflicting signals
+                return {'action': 'HOLD', 'confidence': 0, 'reason': 'Conflicting arbitrage signals'}
+
         except Exception as e:
-            self.logger.error(f"Error calculating trend strength: {e}")
-            return 0.0
+            self.logger.error(f"Error combining arbitrage signals: {e}")
+            return {'action': 'HOLD', 'confidence': 0, 'reason': f'Combination error: {str(e)}'}
+
+    def get_correlation_status(self) -> Dict[str, Any]:
+        """Get current correlation status"""
+        try:
+            status = {}
+
+            for pair in self.correlation_pairs:
+                pair_key = f"{pair[0]}_{pair[1]}"
+                if pair_key in self.correlation_cache:
+                    status[pair_key] = self.correlation_cache[pair_key]
+
+            return status
+
+        except Exception as e:
+            self.logger.error(f"Error getting correlation status: {e}")
+            return {}
 
     def get_strategy_info(self) -> Dict[str, Any]:
         """Get strategy information"""
         return {
             'name': self.name,
+            'type': 'Statistical Arbitrage',
             'timeframe': self.timeframe,
-            'min_confidence': self.min_confidence,
-            'currency_pairs': self.currency_pairs,
-            'correlation_threshold': self.correlation_threshold,
-            'spread_threshold': self.spread_threshold,
-            'active_opportunities': len(self.active_opportunities)
+            'risk_level': 'Low-Medium',
+            'hold_duration': '15min - 4hrs',
+            'description': 'Statistical arbitrage based on correlation and mean reversion',
+            'pairs_monitored': len(self.correlation_pairs)
         }
