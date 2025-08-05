@@ -1,5 +1,5 @@
 
 """
 Utility modules for AuraTrade Bot
-Logging and notifications
+Logging, notifications, and helper functions
 """

@@ -6,443 +6,643 @@ PyQt5-based interface with charts, dashboard, and controls
 
 from PyQt5.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
                            QTabWidget, QMenuBar, QStatusBar, QAction, 
-                           QMessageBox, QSplitter)
-from PyQt5.QtCore import Qt, QTimer, pyqtSignal
-from PyQt5.QtGui import QIcon, QFont
+                           QMessageBox, QSplitter, QPushButton, QLabel,
+                           QTableWidget, QTableWidgetItem, QHeaderView,
+                           QGroupBox, QGridLayout, QTextEdit, QProgressBar,
+                           QSystemTrayIcon, QMenu)
+from PyQt5.QtCore import Qt, QTimer, pyqtSignal, QThread, pyqtSlot
+from PyQt5.QtGui import QIcon, QFont, QPixmap, QColor
 
 from gui.dashboard import TradingDashboard
 from gui.charts import TradingChartWidget
 from utils.logger import Logger
 
 class MainWindow(QMainWindow):
-    """Main application window"""
+    """Professional trading interface"""
     
     def __init__(self, trading_engine, order_manager, risk_manager, data_manager):
         super().__init__()
-        
+        self.logger = Logger().get_logger()
         self.trading_engine = trading_engine
         self.order_manager = order_manager
         self.risk_manager = risk_manager
         self.data_manager = data_manager
-        self.logger = Logger().get_logger()
         
-        self.setup_ui()
-        self.setup_connections()
+        # Update timer
+        self.update_timer = QTimer()
+        self.update_timer.timeout.connect(self.update_display)
+        self.update_timer.start(1000)  # Update every second
         
-    def setup_ui(self):
-        """Setup the main window UI"""
-        self.setWindowTitle("AuraTrade - Institutional Trading Bot v1.0")
-        self.setGeometry(100, 100, 1600, 1000)
+        # System tray
+        self.tray_icon = None
         
-        # Set application icon (if available)
-        # self.setWindowIcon(QIcon('icon.png'))
-        
-        # Create central widget
-        central_widget = QWidget()
-        self.setCentralWidget(central_widget)
-        
-        # Main layout
-        main_layout = QVBoxLayout(central_widget)
-        
-        # Create splitter for resizable panes
-        splitter = QSplitter(Qt.Horizontal)
-        
-        # Left pane - Dashboard
-        self.dashboard = TradingDashboard(
-            self.trading_engine,
-            self.order_manager,
-            self.risk_manager,
-            self
-        )
-        splitter.addWidget(self.dashboard)
-        
-        # Right pane - Charts
-        self.chart_widget = TradingChartWidget(self.data_manager, self)
-        splitter.addWidget(self.chart_widget)
-        
-        # Set splitter proportions
-        splitter.setSizes([1000, 600])
-        
-        main_layout.addWidget(splitter)
-        
-        # Setup menu bar
-        self.create_menu_bar()
-        
-        # Setup status bar
-        self.create_status_bar()
-        
-        # Apply styling
-        self.apply_styling()
-        
-    def create_menu_bar(self):
-        """Create the menu bar"""
-        menubar = self.menuBar()
-        
-        # File menu
-        file_menu = menubar.addMenu('File')
-        
-        # Export data action
-        export_action = QAction('Export Data', self)
-        export_action.triggered.connect(self.export_data)
-        file_menu.addAction(export_action)
-        
-        file_menu.addSeparator()
-        
-        # Exit action
-        exit_action = QAction('Exit', self)
-        exit_action.setShortcut('Ctrl+Q')
-        exit_action.triggered.connect(self.close)
-        file_menu.addAction(exit_action)
-        
-        # Trading menu
-        trading_menu = menubar.addMenu('Trading')
-        
-        # Start trading action
-        start_action = QAction('Start Trading', self)
-        start_action.triggered.connect(self.start_trading)
-        trading_menu.addAction(start_action)
-        
-        # Stop trading action
-        stop_action = QAction('Stop Trading', self)
-        stop_action.triggered.connect(self.stop_trading)
-        trading_menu.addAction(stop_action)
-        
-        trading_menu.addSeparator()
-        
-        # Close all positions action
-        close_all_action = QAction('Close All Positions', self)
-        close_all_action.triggered.connect(self.close_all_positions)
-        trading_menu.addAction(close_all_action)
-        
-        # Risk menu
-        risk_menu = menubar.addMenu('Risk')
-        
-        # Emergency stop action
-        emergency_action = QAction('Emergency Stop', self)
-        emergency_action.triggered.connect(self.emergency_stop)
-        risk_menu.addAction(emergency_action)
-        
-        # Reset daily limits action
-        reset_limits_action = QAction('Reset Daily Limits', self)
-        reset_limits_action.triggered.connect(self.reset_daily_limits)
-        risk_menu.addAction(reset_limits_action)
-        
-        # Help menu
-        help_menu = menubar.addMenu('Help')
-        
-        # About action
-        about_action = QAction('About', self)
-        about_action.triggered.connect(self.show_about)
-        help_menu.addAction(about_action)
-        
-    def create_status_bar(self):
-        """Create the status bar"""
-        self.status_bar = self.statusBar()
-        self.status_bar.showMessage("Ready")
-        
-        # Add connection status
-        self.connection_status = self.status_bar.addPermanentWidget(
-            self.create_status_label("MT5: Disconnected")
-        )
-        
-    def create_status_label(self, text):
-        """Create a status label widget"""
-        from PyQt5.QtWidgets import QLabel
-        
-        label = QLabel(text)
-        label.setStyleSheet("QLabel { color: red; font-weight: bold; }")
-        return label
-        
-    def apply_styling(self):
-        """Apply dark theme styling"""
-        self.setStyleSheet("""
-            QMainWindow {
-                background-color: #2b2b2b;
-                color: white;
-            }
-            
-            QMenuBar {
-                background-color: #3c3c3c;
-                color: white;
-                border: 1px solid #555;
-            }
-            
-            QMenuBar::item {
-                background-color: transparent;
-                padding: 4px 8px;
-            }
-            
-            QMenuBar::item:selected {
-                background-color: #555;
-            }
-            
-            QMenu {
-                background-color: #3c3c3c;
-                color: white;
-                border: 1px solid #555;
-            }
-            
-            QMenu::item:selected {
-                background-color: #555;
-            }
-            
-            QStatusBar {
-                background-color: #3c3c3c;
-                color: white;
-                border-top: 1px solid #555;
-            }
-            
-            QGroupBox {
-                font-weight: bold;
-                border: 2px solid #555;
-                border-radius: 5px;
-                margin-top: 1ex;
-                color: white;
-            }
-            
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                left: 10px;
-                padding: 0 5px 0 5px;
-            }
-            
-            QLabel {
-                color: white;
-            }
-            
-            QPushButton {
-                background-color: #4CAF50;
-                border: none;
-                color: white;
-                padding: 8px 16px;
-                text-align: center;
-                font-size: 14px;
-                border-radius: 4px;
-            }
-            
-            QPushButton:hover {
-                background-color: #45a049;
-            }
-            
-            QPushButton:pressed {
-                background-color: #3d8b40;
-            }
-            
-            QTableWidget {
-                background-color: #3c3c3c;
-                color: white;
-                gridline-color: #555;
-                selection-background-color: #555;
-            }
-            
-            QHeaderView::section {
-                background-color: #555;
-                color: white;
-                border: 1px solid #777;
-                padding: 4px;
-            }
-            
-            QTextEdit {
-                background-color: #1e1e1e;
-                color: #00ff00;
-                border: 1px solid #555;
-                font-family: 'Courier New', monospace;
-            }
-        """)
-        
-    def setup_connections(self):
-        """Setup signal connections"""
-        # Connect dashboard emergency stop signal
-        self.dashboard.emergency_stop_requested.connect(self.emergency_stop)
-        
-        # Setup timer for status updates
-        self.status_timer = QTimer()
-        self.status_timer.timeout.connect(self.update_status)
-        self.status_timer.start(5000)  # Update every 5 seconds
-        
-    def update_status(self):
-        """Update status bar information"""
+        self.init_ui()
+        self.logger.info("Main Window initialized")
+    
+    def init_ui(self):
+        """Initialize the user interface"""
         try:
-            # Update connection status
-            if hasattr(self.trading_engine, 'mt5_connector'):
-                if self.trading_engine.mt5_connector.is_connected():
-                    self.connection_status.setText("MT5: Connected ✅")
-                    self.connection_status.setStyleSheet("QLabel { color: green; font-weight: bold; }")
-                else:
-                    self.connection_status.setText("MT5: Disconnected ❌")
-                    self.connection_status.setStyleSheet("QLabel { color: red; font-weight: bold; }")
+            self.setWindowTitle("AuraTrade Bot v2.0 - Professional Trading System")
+            self.setGeometry(100, 100, 1400, 900)
+            self.setMinimumSize(1200, 800)
             
-            # Update main status message
-            if hasattr(self.trading_engine, 'running') and self.trading_engine.running:
-                self.status_bar.showMessage("Trading Active - AuraTrade Running")
-            else:
-                self.status_bar.showMessage("Trading Stopped")
+            # Set application style
+            self.setStyleSheet("""
+                QMainWindow {
+                    background-color: #1e1e1e;
+                    color: #ffffff;
+                }
+                QTabWidget::pane {
+                    border: 1px solid #444444;
+                    background-color: #2d2d2d;
+                }
+                QTabBar::tab {
+                    background-color: #3d3d3d;
+                    color: #ffffff;
+                    padding: 8px 16px;
+                    margin-right: 2px;
+                }
+                QTabBar::tab:selected {
+                    background-color: #0078d4;
+                }
+                QGroupBox {
+                    font-weight: bold;
+                    color: #ffffff;
+                    border: 2px solid #444444;
+                    border-radius: 5px;
+                    margin-top: 10px;
+                    padding-top: 10px;
+                }
+                QGroupBox::title {
+                    subcontrol-origin: margin;
+                    left: 10px;
+                    padding: 0 5px 0 5px;
+                }
+                QPushButton {
+                    background-color: #0078d4;
+                    color: white;
+                    border: none;
+                    padding: 8px 16px;
+                    border-radius: 4px;
+                    font-weight: bold;
+                }
+                QPushButton:hover {
+                    background-color: #106ebe;
+                }
+                QPushButton:pressed {
+                    background-color: #005a9e;
+                }
+                QPushButton:disabled {
+                    background-color: #666666;
+                    color: #aaaaaa;
+                }
+                QLabel {
+                    color: #ffffff;
+                }
+                QTableWidget {
+                    background-color: #2d2d2d;
+                    color: #ffffff;
+                    gridline-color: #444444;
+                    selection-background-color: #0078d4;
+                }
+                QHeaderView::section {
+                    background-color: #3d3d3d;
+                    color: #ffffff;
+                    padding: 8px;
+                    border: 1px solid #444444;
+                    font-weight: bold;
+                }
+                QTextEdit {
+                    background-color: #2d2d2d;
+                    color: #ffffff;
+                    border: 1px solid #444444;
+                }
+                QProgressBar {
+                    border: 1px solid #444444;
+                    border-radius: 5px;
+                    text-align: center;
+                }
+                QProgressBar::chunk {
+                    background-color: #0078d4;
+                    border-radius: 4px;
+                }
+            """)
+            
+            # Create central widget and main layout
+            central_widget = QWidget()
+            self.setCentralWidget(central_widget)
+            
+            main_layout = QVBoxLayout(central_widget)
+            main_layout.setContentsMargins(5, 5, 5, 5)
+            
+            # Create top toolbar
+            self.create_toolbar(main_layout)
+            
+            # Create main content area
+            self.create_main_content(main_layout)
+            
+            # Create status bar
+            self.create_status_bar()
+            
+            # Create system tray
+            self.create_system_tray()
+            
+            # Create menu bar
+            self.create_menu_bar()
+            
+        except Exception as e:
+            self.logger.error(f"Error initializing UI: {e}")
+    
+    def create_toolbar(self, parent_layout):
+        """Create top toolbar with controls"""
+        try:
+            toolbar_group = QGroupBox("Control Panel")
+            toolbar_layout = QHBoxLayout(toolbar_group)
+            
+            # Trading status
+            self.status_label = QLabel("Status: Starting...")
+            self.status_label.setStyleSheet("color: #ffa500; font-weight: bold;")
+            toolbar_layout.addWidget(self.status_label)
+            
+            toolbar_layout.addStretch()
+            
+            # Control buttons
+            self.start_btn = QPushButton("Start Trading")
+            self.start_btn.clicked.connect(self.start_trading)
+            self.start_btn.setStyleSheet("background-color: #28a745;")
+            toolbar_layout.addWidget(self.start_btn)
+            
+            self.stop_btn = QPushButton("Stop Trading")
+            self.stop_btn.clicked.connect(self.stop_trading)
+            self.stop_btn.setStyleSheet("background-color: #dc3545;")
+            self.stop_btn.setEnabled(False)
+            toolbar_layout.addWidget(self.stop_btn)
+            
+            self.emergency_btn = QPushButton("EMERGENCY STOP")
+            self.emergency_btn.clicked.connect(self.emergency_stop)
+            self.emergency_btn.setStyleSheet("background-color: #ff0000; font-size: 12px;")
+            toolbar_layout.addWidget(self.emergency_btn)
+            
+            parent_layout.addWidget(toolbar_group)
+            
+        except Exception as e:
+            self.logger.error(f"Error creating toolbar: {e}")
+    
+    def create_main_content(self, parent_layout):
+        """Create main content area with tabs"""
+        try:
+            # Create tab widget
+            self.tab_widget = QTabWidget()
+            
+            # Overview tab
+            self.overview_tab = self.create_overview_tab()
+            self.tab_widget.addTab(self.overview_tab, "📊 Overview")
+            
+            # Positions tab
+            self.positions_tab = self.create_positions_tab()
+            self.tab_widget.addTab(self.positions_tab, "💼 Positions")
+            
+            # Charts tab
+            self.charts_tab = self.create_charts_tab()
+            self.tab_widget.addTab(self.charts_tab, "📈 Charts")
+            
+            # Logs tab
+            self.logs_tab = self.create_logs_tab()
+            self.tab_widget.addTab(self.logs_tab, "📝 Logs")
+            
+            parent_layout.addWidget(self.tab_widget)
+            
+        except Exception as e:
+            self.logger.error(f"Error creating main content: {e}")
+    
+    def create_overview_tab(self):
+        """Create overview dashboard tab"""
+        try:
+            tab = QWidget()
+            layout = QHBoxLayout(tab)
+            
+            # Left panel - Account info
+            left_panel = QWidget()
+            left_layout = QVBoxLayout(left_panel)
+            left_panel.setMaximumWidth(400)
+            
+            # Account Information
+            account_group = QGroupBox("Account Information")
+            account_layout = QGridLayout(account_group)
+            
+            self.balance_label = QLabel("$0.00")
+            self.balance_label.setStyleSheet("font-size: 18px; font-weight: bold; color: #28a745;")
+            account_layout.addWidget(QLabel("Balance:"), 0, 0)
+            account_layout.addWidget(self.balance_label, 0, 1)
+            
+            self.equity_label = QLabel("$0.00")
+            account_layout.addWidget(QLabel("Equity:"), 1, 0)
+            account_layout.addWidget(self.equity_label, 1, 1)
+            
+            self.margin_label = QLabel("0.00%")
+            account_layout.addWidget(QLabel("Margin Level:"), 2, 0)
+            account_layout.addWidget(self.margin_label, 2, 1)
+            
+            self.pnl_label = QLabel("$0.00")
+            account_layout.addWidget(QLabel("Daily P&L:"), 3, 0)
+            account_layout.addWidget(self.pnl_label, 3, 1)
+            
+            left_layout.addWidget(account_group)
+            
+            # Trading Statistics
+            stats_group = QGroupBox("Trading Statistics")
+            stats_layout = QGridLayout(stats_group)
+            
+            self.trades_label = QLabel("0")
+            stats_layout.addWidget(QLabel("Trades Today:"), 0, 0)
+            stats_layout.addWidget(self.trades_label, 0, 1)
+            
+            self.winrate_label = QLabel("0.0%")
+            stats_layout.addWidget(QLabel("Win Rate:"), 1, 0)
+            stats_layout.addWidget(self.winrate_label, 1, 1)
+            
+            self.positions_label = QLabel("0")
+            stats_layout.addWidget(QLabel("Open Positions:"), 2, 0)
+            stats_layout.addWidget(self.positions_label, 2, 1)
+            
+            self.drawdown_label = QLabel("0.0%")
+            stats_layout.addWidget(QLabel("Drawdown:"), 3, 0)
+            stats_layout.addWidget(self.drawdown_label, 3, 1)
+            
+            left_layout.addWidget(stats_group)
+            
+            # Risk Status
+            risk_group = QGroupBox("Risk Management")
+            risk_layout = QVBoxLayout(risk_group)
+            
+            self.risk_status_label = QLabel("Risk Status: SAFE")
+            self.risk_status_label.setStyleSheet("font-weight: bold; color: #28a745;")
+            risk_layout.addWidget(self.risk_status_label)
+            
+            self.risk_progress = QProgressBar()
+            self.risk_progress.setMaximum(100)
+            self.risk_progress.setValue(25)
+            risk_layout.addWidget(self.risk_progress)
+            
+            left_layout.addWidget(risk_group)
+            left_layout.addStretch()
+            
+            layout.addWidget(left_panel)
+            
+            # Right panel - Dashboard chart
+            try:
+                self.dashboard = TradingDashboard()
+                layout.addWidget(self.dashboard)
+            except Exception as e:
+                self.logger.warning(f"Could not create dashboard: {e}")
+                placeholder = QLabel("Dashboard not available")
+                placeholder.setAlignment(Qt.AlignCenter)
+                layout.addWidget(placeholder)
+            
+            return tab
+            
+        except Exception as e:
+            self.logger.error(f"Error creating overview tab: {e}")
+            return QWidget()
+    
+    def create_positions_tab(self):
+        """Create positions management tab"""
+        try:
+            tab = QWidget()
+            layout = QVBoxLayout(tab)
+            
+            # Positions table
+            self.positions_table = QTableWidget()
+            self.positions_table.setColumnCount(9)
+            self.positions_table.setHorizontalHeaderLabels([
+                "Ticket", "Symbol", "Type", "Volume", "Entry", "Current", "SL", "TP", "Profit"
+            ])
+            
+            # Auto-resize columns
+            header = self.positions_table.horizontalHeader()
+            header.setSectionResizeMode(QHeaderView.Stretch)
+            
+            layout.addWidget(self.positions_table)
+            
+            # Position controls
+            controls_layout = QHBoxLayout()
+            
+            close_all_btn = QPushButton("Close All Positions")
+            close_all_btn.clicked.connect(self.close_all_positions)
+            close_all_btn.setStyleSheet("background-color: #dc3545;")
+            controls_layout.addWidget(close_all_btn)
+            
+            controls_layout.addStretch()
+            
+            refresh_btn = QPushButton("Refresh")
+            refresh_btn.clicked.connect(self.refresh_positions)
+            controls_layout.addWidget(refresh_btn)
+            
+            layout.addLayout(controls_layout)
+            
+            return tab
+            
+        except Exception as e:
+            self.logger.error(f"Error creating positions tab: {e}")
+            return QWidget()
+    
+    def create_charts_tab(self):
+        """Create charts tab"""
+        try:
+            tab = QWidget()
+            layout = QVBoxLayout(tab)
+            
+            try:
+                self.chart_widget = TradingChartWidget()
+                layout.addWidget(self.chart_widget)
+            except Exception as e:
+                self.logger.warning(f"Could not create chart widget: {e}")
+                placeholder = QLabel("Charts not available")
+                placeholder.setAlignment(Qt.AlignCenter)
+                layout.addWidget(placeholder)
+            
+            return tab
+            
+        except Exception as e:
+            self.logger.error(f"Error creating charts tab: {e}")
+            return QWidget()
+    
+    def create_logs_tab(self):
+        """Create logs tab"""
+        try:
+            tab = QWidget()
+            layout = QVBoxLayout(tab)
+            
+            self.log_text = QTextEdit()
+            self.log_text.setReadOnly(True)
+            self.log_text.setFont(QFont("Consolas", 9))
+            layout.addWidget(self.log_text)
+            
+            # Log controls
+            controls_layout = QHBoxLayout()
+            
+            clear_btn = QPushButton("Clear Logs")
+            clear_btn.clicked.connect(self.log_text.clear)
+            controls_layout.addWidget(clear_btn)
+            
+            controls_layout.addStretch()
+            
+            layout.addLayout(controls_layout)
+            
+            return tab
+            
+        except Exception as e:
+            self.logger.error(f"Error creating logs tab: {e}")
+            return QWidget()
+    
+    def create_status_bar(self):
+        """Create status bar"""
+        try:
+            self.status_bar = QStatusBar()
+            self.setStatusBar(self.status_bar)
+            
+            # Connection status
+            self.connection_status = QLabel("Disconnected")
+            self.connection_status.setStyleSheet("color: #dc3545; font-weight: bold;")
+            self.status_bar.addPermanentWidget(self.connection_status)
+            
+            self.status_bar.showMessage("AuraTrade Bot Ready")
+            
+        except Exception as e:
+            self.logger.error(f"Error creating status bar: {e}")
+    
+    def create_system_tray(self):
+        """Create system tray icon"""
+        try:
+            if QSystemTrayIcon.isSystemTrayAvailable():
+                self.tray_icon = QSystemTrayIcon(self)
+                
+                # Create tray menu
+                tray_menu = QMenu()
+                
+                show_action = tray_menu.addAction("Show Window")
+                show_action.triggered.connect(self.show)
+                
+                hide_action = tray_menu.addAction("Hide Window")
+                hide_action.triggered.connect(self.hide)
+                
+                tray_menu.addSeparator()
+                
+                quit_action = tray_menu.addAction("Quit")
+                quit_action.triggered.connect(self.close)
+                
+                self.tray_icon.setContextMenu(tray_menu)
+                self.tray_icon.show()
                 
         except Exception as e:
-            self.logger.error(f"Error updating status: {e}")
-            self.status_bar.showMessage("Status Update Error")
+            self.logger.error(f"Error creating system tray: {e}")
+    
+    def create_menu_bar(self):
+        """Create menu bar"""
+        try:
+            menubar = self.menuBar()
+            
+            # File menu
+            file_menu = menubar.addMenu('File')
+            
+            export_action = QAction('Export Data', self)
+            file_menu.addAction(export_action)
+            
+            file_menu.addSeparator()
+            
+            exit_action = QAction('Exit', self)
+            exit_action.triggered.connect(self.close)
+            file_menu.addAction(exit_action)
+            
+            # View menu
+            view_menu = menubar.addMenu('View')
+            
+            minimize_action = QAction('Minimize to Tray', self)
+            minimize_action.triggered.connect(self.hide)
+            view_menu.addAction(minimize_action)
+            
+            # Help menu
+            help_menu = menubar.addMenu('Help')
+            
+            about_action = QAction('About', self)
+            about_action.triggered.connect(self.show_about)
+            help_menu.addAction(about_action)
+            
+        except Exception as e:
+            self.logger.error(f"Error creating menu bar: {e}")
+    
+    @pyqtSlot()
+    def update_display(self):
+        """Update all display elements"""
+        try:
+            if not self.trading_engine:
+                return
+            
+            # Get current status
+            status = self.trading_engine.get_status()
+            
+            # Update status label
+            if status.get('running', False):
+                self.status_label.setText("Status: ACTIVE")
+                self.status_label.setStyleSheet("color: #28a745; font-weight: bold;")
+                self.start_btn.setEnabled(False)
+                self.stop_btn.setEnabled(True)
+            else:
+                self.status_label.setText("Status: STOPPED")
+                self.status_label.setStyleSheet("color: #dc3545; font-weight: bold;")
+                self.start_btn.setEnabled(True)
+                self.stop_btn.setEnabled(False)
+            
+            # Update connection status
+            if status.get('connected', False):
+                self.connection_status.setText("Connected")
+                self.connection_status.setStyleSheet("color: #28a745; font-weight: bold;")
+            else:
+                self.connection_status.setText("Disconnected")
+                self.connection_status.setStyleSheet("color: #dc3545; font-weight: bold;")
+            
+            # Update account info
+            self.balance_label.setText(f"${status.get('balance', 0.0):.2f}")
+            self.equity_label.setText(f"${status.get('equity', 0.0):.2f}")
+            self.pnl_label.setText(f"${status.get('daily_pnl', 0.0):.2f}")
+            
+            # Set P&L color
+            pnl = status.get('daily_pnl', 0.0)
+            if pnl > 0:
+                self.pnl_label.setStyleSheet("color: #28a745; font-weight: bold;")
+            elif pnl < 0:
+                self.pnl_label.setStyleSheet("color: #dc3545; font-weight: bold;")
+            else:
+                self.pnl_label.setStyleSheet("color: #ffffff;")
+            
+            # Update statistics
+            self.trades_label.setText(str(status.get('trades_today', 0)))
+            self.winrate_label.setText(f"{status.get('win_rate', 0.0):.1f}%")
+            self.positions_label.setText(str(status.get('open_positions', 0)))
+            
+            # Update positions table
+            self.update_positions_table()
+            
+        except Exception as e:
+            self.logger.error(f"Error updating display: {e}")
+    
+    def update_positions_table(self):
+        """Update positions table"""
+        try:
+            if not hasattr(self, 'positions_table'):
+                return
+            
+            positions = self.trading_engine.mt5_connector.get_positions()
+            self.positions_table.setRowCount(len(positions))
+            
+            for row, position in enumerate(positions):
+                self.positions_table.setItem(row, 0, QTableWidgetItem(str(position['ticket'])))
+                self.positions_table.setItem(row, 1, QTableWidgetItem(position['symbol']))
+                self.positions_table.setItem(row, 2, QTableWidgetItem('BUY' if position['type'] == 0 else 'SELL'))
+                self.positions_table.setItem(row, 3, QTableWidgetItem(f"{position['volume']:.2f}"))
+                self.positions_table.setItem(row, 4, QTableWidgetItem(f"{position['price_open']:.5f}"))
+                self.positions_table.setItem(row, 5, QTableWidgetItem(f"{position['price_current']:.5f}"))
+                self.positions_table.setItem(row, 6, QTableWidgetItem(f"{position['sl']:.5f}" if position['sl'] > 0 else "-"))
+                self.positions_table.setItem(row, 7, QTableWidgetItem(f"{position['tp']:.5f}" if position['tp'] > 0 else "-"))
+                
+                # Profit with color
+                profit_item = QTableWidgetItem(f"{position['profit']:.2f}")
+                if position['profit'] > 0:
+                    profit_item.setForeground(QColor('#28a745'))
+                elif position['profit'] < 0:
+                    profit_item.setForeground(QColor('#dc3545'))
+                self.positions_table.setItem(row, 8, profit_item)
+                
+        except Exception as e:
+            self.logger.error(f"Error updating positions table: {e}")
     
     def start_trading(self):
-        """Start trading engine"""
+        """Start trading"""
         try:
-            if hasattr(self.trading_engine, 'start'):
+            if self.trading_engine and not self.trading_engine.running:
                 self.trading_engine.start()
-                self.status_bar.showMessage("Trading Started")
-                self.logger.info("Trading started via GUI")
-            
+                self.logger.info("Trading started from GUI")
         except Exception as e:
             self.logger.error(f"Error starting trading: {e}")
             QMessageBox.critical(self, "Error", f"Failed to start trading: {e}")
     
     def stop_trading(self):
-        """Stop trading engine"""
+        """Stop trading"""
         try:
-            if hasattr(self.trading_engine, 'stop'):
+            if self.trading_engine and self.trading_engine.running:
                 self.trading_engine.stop()
-                self.status_bar.showMessage("Trading Stopped")
-                self.logger.info("Trading stopped via GUI")
-            
+                self.logger.info("Trading stopped from GUI")
         except Exception as e:
             self.logger.error(f"Error stopping trading: {e}")
             QMessageBox.critical(self, "Error", f"Failed to stop trading: {e}")
     
-    def close_all_positions(self):
-        """Close all open positions"""
+    def emergency_stop(self):
+        """Emergency stop all trading"""
         try:
-            reply = QMessageBox.question(
-                self, 'Confirm', 
-                'Are you sure you want to close all positions?',
-                QMessageBox.Yes | QMessageBox.No,
-                QMessageBox.No
-            )
+            reply = QMessageBox.question(self, 'Emergency Stop', 
+                                       'Are you sure you want to EMERGENCY STOP?\nThis will close all positions and stop trading.',
+                                       QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
             
             if reply == QMessageBox.Yes:
-                closed_count = self.order_manager.close_all_positions()
-                QMessageBox.information(self, "Success", f"Closed {closed_count} positions")
-                self.logger.info(f"Closed {closed_count} positions via GUI")
-            
+                if self.trading_engine:
+                    self.trading_engine.stop()
+                if self.order_manager:
+                    self.order_manager.close_all_orders()
+                if self.risk_manager:
+                    self.risk_manager.emergency_stop = True
+                
+                self.logger.warning("EMERGENCY STOP activated from GUI")
+                QMessageBox.information(self, "Emergency Stop", "Emergency stop activated. All trading stopped.")
+                
         except Exception as e:
-            self.logger.error(f"Error closing positions: {e}")
+            self.logger.error(f"Error in emergency stop: {e}")
+            QMessageBox.critical(self, "Error", f"Emergency stop error: {e}")
+    
+    def close_all_positions(self):
+        """Close all positions"""
+        try:
+            reply = QMessageBox.question(self, 'Close All Positions', 
+                                       'Are you sure you want to close all positions?',
+                                       QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+            
+            if reply == QMessageBox.Yes and self.order_manager:
+                result = self.order_manager.close_all_orders()
+                if result['success']:
+                    QMessageBox.information(self, "Success", f"Closed {result['closed_count']} positions")
+                else:
+                    QMessageBox.warning(self, "Warning", f"Some positions could not be closed: {result['errors']}")
+                    
+        except Exception as e:
+            self.logger.error(f"Error closing all positions: {e}")
             QMessageBox.critical(self, "Error", f"Failed to close positions: {e}")
     
-    def emergency_stop(self):
-        """Trigger emergency stop"""
+    def refresh_positions(self):
+        """Refresh positions table"""
         try:
-            reply = QMessageBox.warning(
-                self, 'Emergency Stop', 
-                'This will immediately close all positions and stop trading.\n\nAre you sure?',
-                QMessageBox.Yes | QMessageBox.No,
-                QMessageBox.No
-            )
-            
-            if reply == QMessageBox.Yes:
-                # Stop trading engine
-                if hasattr(self.trading_engine, 'stop'):
-                    self.trading_engine.stop()
-                
-                # Emergency stop via order manager
-                success = self.order_manager.emergency_stop()
-                
-                if success:
-                    QMessageBox.information(self, "Emergency Stop", "Emergency stop executed successfully")
-                    self.logger.warning("Emergency stop executed via GUI")
-                else:
-                    QMessageBox.critical(self, "Error", "Emergency stop failed")
-            
+            self.update_positions_table()
         except Exception as e:
-            self.logger.error(f"Error during emergency stop: {e}")
-            QMessageBox.critical(self, "Error", f"Emergency stop failed: {e}")
-    
-    def reset_daily_limits(self):
-        """Reset daily risk limits"""
-        try:
-            reply = QMessageBox.question(
-                self, 'Reset Daily Limits', 
-                'Reset daily risk limits and counters?',
-                QMessageBox.Yes | QMessageBox.No,
-                QMessageBox.No
-            )
-            
-            if reply == QMessageBox.Yes:
-                self.risk_manager.reset_daily_limits()
-                QMessageBox.information(self, "Success", "Daily limits reset successfully")
-                self.logger.info("Daily limits reset via GUI")
-            
-        except Exception as e:
-            self.logger.error(f"Error resetting daily limits: {e}")
-            QMessageBox.critical(self, "Error", f"Failed to reset daily limits: {e}")
-    
-    def export_data(self):
-        """Export trading data"""
-        try:
-            from PyQt5.QtWidgets import QFileDialog
-            import json
-            from datetime import datetime
-            
-            filename, _ = QFileDialog.getSaveFileName(
-                self, 'Export Data', 
-                f'auratrade_data_{datetime.now().strftime("%Y%m%d_%H%M%S")}.json',
-                'JSON Files (*.json)'
-            )
-            
-            if filename:
-                # Collect data to export
-                export_data = {
-                    'timestamp': datetime.now().isoformat(),
-                    'order_history': self.order_manager.order_history,
-                    'risk_summary': self.risk_manager.get_risk_summary(),
-                    'order_statistics': self.order_manager.get_order_statistics()
-                }
-                
-                # Save to file
-                with open(filename, 'w') as f:
-                    json.dump(export_data, f, indent=2, default=str)
-                
-                QMessageBox.information(self, "Success", f"Data exported to {filename}")
-                self.logger.info(f"Data exported to {filename}")
-            
-        except Exception as e:
-            self.logger.error(f"Error exporting data: {e}")
-            QMessageBox.critical(self, "Error", f"Failed to export data: {e}")
+            self.logger.error(f"Error refreshing positions: {e}")
     
     def show_about(self):
         """Show about dialog"""
-        about_text = """
-        <h2>AuraTrade - Institutional Trading Bot</h2>
-        <p>Version 1.0.0</p>
-        <p>Advanced automated trading system with:</p>
-        <ul>
-            <li>MetaTrader 5 integration</li>
-            <li>Multiple trading strategies</li>
-            <li>Advanced risk management</li>
-            <li>Machine learning capabilities</li>
-            <li>Real-time GUI dashboard</li>
-        </ul>
-        <p><b>Developed for professional trading</b></p>
-        """
-        
-        QMessageBox.about(self, "About AuraTrade", about_text)
+        try:
+            QMessageBox.about(self, "About AuraTrade Bot", 
+                            "AuraTrade Bot v2.0\n\n"
+                            "High-Performance Trading System\n"
+                            "Target: 75%+ Win Rate\n"
+                            "Conservative Risk Management\n\n"
+                            "Professional Algorithmic Trading")
+        except Exception as e:
+            self.logger.error(f"Error showing about dialog: {e}")
     
     def closeEvent(self, event):
         """Handle window close event"""
         try:
-            reply = QMessageBox.question(
-                self, 'Confirm Exit', 
-                'Are you sure you want to exit AuraTrade?\n\nThis will stop all trading activity.',
-                QMessageBox.Yes | QMessageBox.No,
-                QMessageBox.No
-            )
-            
-            if reply == QMessageBox.Yes:
-                # Stop trading engine
-                if hasattr(self.trading_engine, 'stop'):
-                    self.trading_engine.stop()
-                
-                self.logger.info("Application closed via GUI")
-                event.accept()
-            else:
+            if self.tray_icon and self.tray_icon.isVisible():
+                self.hide()
                 event.ignore()
-                
+            else:
+                event.accept()
         except Exception as e:
-            self.logger.error(f"Error during application close: {e}")
-            event.accept()  # Force close if error occurs
+            self.logger.error(f"Error in close event: {e}")
+            event.accept()

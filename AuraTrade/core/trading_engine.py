@@ -1,17 +1,13 @@
-
 """
-Main trading engine optimized for high win rate (85%+)
-Implements conservative risk management and advanced signal filtering
+High-performance Trading Engine for AuraTrade Bot
+Manages all trading operations, strategies, and risk controls
 """
 
 import threading
 import time
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Optional, Any
 from datetime import datetime, timedelta
 import pandas as pd
-
-from config.config import Config
-from config.settings import Settings
 from core.mt5_connector import MT5Connector
 from core.order_manager import OrderManager
 from core.risk_manager import RiskManager
@@ -21,18 +17,11 @@ from utils.logger import Logger
 from utils.notifier import TelegramNotifier
 
 class TradingEngine:
-    """High-performance trading engine optimized for 85%+ win rate"""
-    
-    def __init__(self, mt5_connector: MT5Connector, order_manager: OrderManager,
-                 risk_manager: RiskManager, position_sizing: PositionSizing,
-                 data_manager: DataManager, ml_engine, notifier: TelegramNotifier,
-                 strategies: dict, technical_analysis):
-        
+    """High-performance trading engine with multi-strategy support"""
+
+    def __init__(self, mt5_connector, order_manager, risk_manager, position_sizing,
+                 data_manager, ml_engine, notifier, strategies, technical_analysis):
         self.logger = Logger().get_logger()
-        self.config = Config()
-        self.settings = Settings()
-        
-        # Core components
         self.mt5_connector = mt5_connector
         self.order_manager = order_manager
         self.risk_manager = risk_manager
@@ -42,524 +31,382 @@ class TradingEngine:
         self.notifier = notifier
         self.strategies = strategies
         self.technical_analysis = technical_analysis
-        
-        # Control flags
+
+        # Engine state
         self.running = False
-        self.paused = False
-        self.emergency_stop = False
-        
-        # Threading
-        self.main_thread = None
-        
-        # Performance tracking for 85%+ win rate
+        self.trading_thread = None
+        self.analysis_thread = None
+
+        # Performance tracking
         self.trades_today = 0
-        self.winning_trades = 0
-        self.losing_trades = 0
+        self.wins = 0
+        self.losses = 0
         self.daily_pnl = 0.0
-        self.consecutive_losses = 0
-        self.last_trade_time = None
-        self.win_rate = 0.0
-        
-        # High-quality signal filtering (conservative approach)
-        self.min_signal_confirmation = 3  # Require 3+ confirmations
-        self.max_daily_trades = 10  # Limit trades for quality
-        self.required_win_rate = 85.0  # Target win rate
-        
+        self.start_balance = 0.0
+
+        # Configuration
+        self.symbols = ['EURUSD', 'GBPUSD', 'USDJPY', 'XAUUSD']
+        self.check_interval = 1.0  # seconds
+        self.max_concurrent_trades = 5
+        self.min_confidence = 70.0
+
+        self.logger.info("Trading Engine initialized")
+
     def start(self):
         """Start the trading engine"""
         try:
             if self.running:
-                self.logger.warning("Trading engine is already running")
+                self.logger.warning("Trading engine already running")
                 return
-            
-            self.logger.info("🚀 Starting AuraTrade High-Performance Engine...")
+
+            self.logger.info("Starting high-performance trading engine...")
             self.running = True
-            self.emergency_stop = False
-            
-            # Reset daily counters if new day
-            self._reset_daily_counters()
-            
-            # Start main trading loop
-            self.main_thread = threading.Thread(target=self._main_trading_loop, daemon=True)
-            self.main_thread.start()
-            
-            self.logger.info("✅ Trading engine started successfully")
-            
+
+            # Record start balance
+            account_info = self.mt5_connector.get_account_info()
+            self.start_balance = account_info.get('balance', 0.0)
+
+            # Start trading thread
+            self.trading_thread = threading.Thread(target=self._trading_loop, daemon=True)
+            self.trading_thread.start()
+
+            # Start analysis thread
+            self.analysis_thread = threading.Thread(target=self._analysis_loop, daemon=True)
+            self.analysis_thread.start()
+
+            self.logger.info("Trading engine started successfully")
+
         except Exception as e:
-            self.logger.error(f"❌ Failed to start trading engine: {e}")
+            self.logger.error(f"Failed to start trading engine: {e}")
             self.running = False
-    
+
     def stop(self):
         """Stop the trading engine"""
         try:
-            self.logger.info("🛑 Stopping trading engine...")
+            self.logger.info("Stopping trading engine...")
             self.running = False
-            
-            # Wait for main thread to finish
-            if self.main_thread and self.main_thread.is_alive():
-                self.main_thread.join(timeout=10)
-            
-            self.logger.info("✅ Trading engine stopped")
-            
+
+            # Wait for threads to complete
+            if self.trading_thread and self.trading_thread.is_alive():
+                self.trading_thread.join(timeout=5.0)
+
+            if self.analysis_thread and self.analysis_thread.is_alive():
+                self.analysis_thread.join(timeout=5.0)
+
+            self.logger.info("Trading engine stopped")
+
         except Exception as e:
-            self.logger.error(f"❌ Error stopping trading engine: {e}")
-    
-    def _main_trading_loop(self):
-        """Main trading loop optimized for high win rate"""
-        self.logger.info("🔄 High-performance trading loop started")
-        
-        while self.running and not self.emergency_stop:
+            self.logger.error(f"Error stopping trading engine: {e}")
+
+    def _trading_loop(self):
+        """Main trading loop"""
+        self.logger.info("Trading loop started")
+
+        while self.running:
             try:
-                # Check if paused
-                if self.paused:
-                    time.sleep(1)
+                # Check MT5 connection
+                if not self.mt5_connector.ensure_connection():
+                    self.logger.warning("MT5 connection lost, retrying...")
+                    time.sleep(10)
                     continue
-                
-                # Check connection
-                if not self.mt5_connector.is_connected():
-                    self.logger.warning("⚠️ MT5 connection lost, attempting reconnection...")
-                    if not self.mt5_connector.reconnect():
-                        time.sleep(10)
-                        continue
-                
-                # Conservative daily limits check
-                if self._check_conservative_limits():
-                    self.logger.info("📊 Daily limits reached - maintaining high win rate")
-                    break
-                
-                # Risk management check
-                if self.risk_manager.check_emergency_stop():
-                    self.emergency_stop_all()
-                    break
-                
-                # Update market data
-                self._update_market_data()
-                
-                # Process high-quality trading signals only
-                self._process_high_quality_signals()
-                
-                # Monitor existing positions
-                self._monitor_positions()
-                
-                # Update performance metrics
-                self._update_performance_metrics()
-                
-                # Sleep to maintain quality over quantity
-                time.sleep(1)  # Slower loop for better quality
-                
-            except Exception as e:
-                self.logger.error(f"❌ Error in main trading loop: {e}")
-                time.sleep(1)
-        
-        self.logger.info("🏁 High-performance trading loop ended")
-    
-    def _process_high_quality_signals(self):
-        """Process signals from multiple strategies"""
-        try:
-            # Only trade major pairs during optimal hours
-            optimal_symbols = ['EURUSD', 'GBPUSD', 'USDJPY', 'XAUUSD']
-            current_hour = datetime.now().hour
-            
-            # Trade only during optimal market hours (high liquidity)
-            if not (8 <= current_hour <= 17):  # European/US overlap
-                return
-            
-            for symbol in optimal_symbols:
-                if not self._is_symbol_optimal_for_trading(symbol):
+
+                # Check risk limits
+                if not self.risk_manager.check_global_risk():
+                    self.logger.warning("Global risk limits exceeded, pausing trading")
+                    time.sleep(60)
                     continue
-                
-                # Get data with technical analysis
-                m15_data = self.data_manager.get_rates(symbol, 'M15', 100)
-                if m15_data is None or len(m15_data) < 50:
-                    continue
-                
-                # Add comprehensive technical analysis
-                m15_data = self.technical_analysis.calculate_all_indicators(m15_data)
-                
-                # Get current price
-                current_price = self.data_manager.get_current_price(symbol)
-                if not current_price:
-                    continue
-                
-                # Get market condition
-                market_condition = self.data_manager.analyze_market_condition(symbol)
-                
-                # Check all strategies for signals
-                best_signal = None
-                highest_confidence = 0
-                
-                for strategy_name, strategy in self.strategies.items():
-                    if not strategy.enabled:
-                        continue
-                    
+
+                # Process each symbol
+                for symbol in self.symbols:
+                    if not self.running:
+                        break
+
                     try:
-                        signal = strategy.analyze_signal(symbol, m15_data, current_price, market_condition)
-                        
-                        if signal and signal['confidence'] > highest_confidence:
-                            best_signal = signal
-                            highest_confidence = signal['confidence']
-                            
+                        self._process_symbol(symbol)
                     except Exception as e:
-                        self.logger.error(f"Error in {strategy_name} strategy: {e}")
-                
-                # Execute best signal if confidence is high enough
-                if best_signal and highest_confidence >= 70:
-                    self._execute_strategy_trade(symbol, best_signal)
-                    
-        except Exception as e:
-            self.logger.error(f"❌ Error processing signals: {e}")
-    
-    def _get_signal_confirmations(self, symbol: str) -> int:
-        """Get number of signal confirmations from different sources"""
+                        self.logger.error(f"Error processing {symbol}: {e}")
+
+                # Check existing positions
+                self._manage_positions()
+
+                # Update performance metrics
+                self._update_performance()
+
+                time.sleep(self.check_interval)
+
+            except Exception as e:
+                self.logger.error(f"Error in trading loop: {e}")
+                time.sleep(5)
+
+        self.logger.info("Trading loop ended")
+
+    def _analysis_loop(self):
+        """Analysis and signal generation loop"""
+        self.logger.info("Analysis loop started")
+
+        while self.running:
+            try:
+                # Update market data
+                for symbol in self.symbols:
+                    if not self.running:
+                        break
+
+                    # Get latest data
+                    df = self.mt5_connector.get_rates(symbol, 'M1', 100)
+                    if df is not None and len(df) > 0:
+                        self.data_manager.update_symbol_data(symbol, df)
+
+                time.sleep(30)  # Update every 30 seconds
+
+            except Exception as e:
+                self.logger.error(f"Error in analysis loop: {e}")
+                time.sleep(30)
+
+        self.logger.info("Analysis loop ended")
+
+    def _process_symbol(self, symbol: str):
+        """Process trading signals for a symbol"""
         try:
-            confirmations = 0
-            
-            # Get data for multiple timeframes
-            m15_data = self.data_manager.get_rates(symbol, 'M15', 100)
-            h1_data = self.data_manager.get_rates(symbol, 'H1', 100)
-            h4_data = self.data_manager.get_rates(symbol, 'H4', 100)
-            
-            if any(data is None or len(data) < 50 for data in [m15_data, h1_data, h4_data]):
-                return 0
-            
-            # Technical analysis confirmation
-            if self._check_technical_confirmation(m15_data, h1_data):
-                confirmations += 1
-            
-            # Trend alignment confirmation
-            if self._check_trend_alignment(h1_data, h4_data):
-                confirmations += 1
-            
-            # Volume confirmation
-            if self._check_volume_confirmation(m15_data):
-                confirmations += 1
-            
-            # Support/Resistance confirmation
-            if self._check_sr_confirmation(symbol, m15_data):
-                confirmations += 1
-            
-            # Market condition confirmation
-            if self._check_market_condition_favorable():
-                confirmations += 1
-            
-            return confirmations
-            
+            # Get market data
+            df = self.data_manager.get_symbol_data(symbol)
+            if df is None or len(df) < 50:
+                return
+
+            # Get symbol info
+            symbol_info = self.mt5_connector.get_symbol_info(symbol)
+            if symbol_info is None:
+                return
+
+            # Check market conditions
+            if not self._check_market_conditions(symbol_info):
+                return
+
+            # Check position limits
+            current_positions = len([p for p in self.mt5_connector.get_positions() 
+                                   if p['symbol'] == symbol])
+            if current_positions >= 2:  # Max 2 positions per symbol
+                return
+
+            # Generate signals from all strategies
+            signals = []
+
+            for strategy_name, strategy in self.strategies.items():
+                try:
+                    signal = strategy.generate_signal(df, symbol_info)
+                    if signal and signal.get('confidence', 0) >= self.min_confidence:
+                        signal['strategy'] = strategy_name
+                        signals.append(signal)
+                except Exception as e:
+                    self.logger.error(f"Error in {strategy_name} strategy: {e}")
+
+            # Process signals
+            if signals:
+                best_signal = max(signals, key=lambda x: x.get('confidence', 0))
+                self._execute_signal(symbol, best_signal)
+
         except Exception as e:
-            self.logger.error(f"❌ Error getting signal confirmations for {symbol}: {e}")
-            return 0
-    
-    def _check_technical_confirmation(self, m15_data: pd.DataFrame, h1_data: pd.DataFrame) -> bool:
-        """Check technical analysis confirmation across timeframes"""
-        try:
-            # Calculate key indicators for both timeframes
-            m15_ema20 = m15_data['close'].ewm(span=20).mean()
-            m15_ema50 = m15_data['close'].ewm(span=50).mean()
-            
-            h1_ema20 = h1_data['close'].ewm(span=20).mean()
-            h1_ema50 = h1_data['close'].ewm(span=50).mean()
-            
-            # Check if both timeframes show same trend direction
-            m15_bullish = m15_ema20.iloc[-1] > m15_ema50.iloc[-1]
-            h1_bullish = h1_ema20.iloc[-1] > h1_ema50.iloc[-1]
-            
-            # Confirmation if both timeframes agree
-            return m15_bullish == h1_bullish
-            
-        except Exception as e:
-            self.logger.error(f"❌ Error in technical confirmation: {e}")
-            return False
-    
-    def _check_trend_alignment(self, h1_data: pd.DataFrame, h4_data: pd.DataFrame) -> bool:
-        """Check trend alignment between H1 and H4"""
-        try:
-            # Calculate trend indicators
-            h1_sma = h1_data['close'].rolling(20).mean()
-            h4_sma = h4_data['close'].rolling(20).mean()
-            
-            # Check trend direction alignment
-            h1_trend_up = h1_data['close'].iloc[-1] > h1_sma.iloc[-1]
-            h4_trend_up = h4_data['close'].iloc[-1] > h4_sma.iloc[-1]
-            
-            return h1_trend_up == h4_trend_up
-            
-        except Exception as e:
-            self.logger.error(f"❌ Error in trend alignment check: {e}")
-            return False
-    
-    def _check_volume_confirmation(self, data: pd.DataFrame) -> bool:
-        """Check volume confirmation (placeholder - MT5 doesn't provide volume for forex)"""
-        try:
-            # For forex, we can use tick volume or price action
-            # Check for increasing volatility as volume proxy
-            recent_range = (data['high'] - data['low']).tail(5).mean()
-            overall_range = (data['high'] - data['low']).tail(20).mean()
-            
-            return recent_range > overall_range * 1.2
-            
-        except Exception as e:
-            self.logger.error(f"❌ Error in volume confirmation: {e}")
-            return False
-    
-    def _check_sr_confirmation(self, symbol: str, data: pd.DataFrame) -> bool:
-        """Check support/resistance level confirmation"""
-        try:
-            current_price = data['close'].iloc[-1]
-            
-            # Find recent support/resistance levels
-            highs = data['high'].tail(50)
-            lows = data['low'].tail(50)
-            
-            # Check if price is near key level (within 0.1%)
-            for level in [highs.max(), lows.min()]:
-                distance = abs(current_price - level) / current_price
-                if distance < 0.001:  # Within 0.1%
-                    return True
-            
-            return False
-            
-        except Exception as e:
-            self.logger.error(f"❌ Error in S/R confirmation: {e}")
-            return False
-    
-    def _check_market_condition_favorable(self) -> bool:
-        """Check if market conditions are favorable for high win rate"""
-        try:
-            current_hour = datetime.now().hour
-            
-            # Avoid trading during low liquidity periods
-            if current_hour < 6 or current_hour > 20:
-                return False
-            
-            # Avoid major news release times (simplified check)
-            # In practice, you'd integrate with economic calendar
-            return True
-            
-        except Exception as e:
-            self.logger.error(f"❌ Error checking market conditions: {e}")
-            return False
-    
-    def _execute_strategy_trade(self, symbol: str, signal: Dict[str, Any]):
-        """Execute trade based on strategy signal"""
-        try:
-            # Get signal parameters
-            entry_price = signal['entry_price']
-            signal_direction = signal['signal']
-            risk_percent = signal.get('risk_percent', 1.0)
-            sl_pips = signal.get('stop_loss_pips', 2.0)
-            tp_pips = signal.get('take_profit_pips', 4.0)
-            strategy_name = signal.get('strategy', 'Unknown')
-            
-            # Calculate stop loss and take profit prices
-            pip_size = 0.0001 if 'JPY' not in symbol else 0.01
-            
-            if signal_direction == 'buy':
-                stop_loss = entry_price - (sl_pips * pip_size)
-                take_profit = entry_price + (tp_pips * pip_size)
-                order_type = 0  # Buy
-            else:
-                stop_loss = entry_price + (sl_pips * pip_size)
-                take_profit = entry_price - (tp_pips * pip_size)
-                order_type = 1  # Sell
-            
-            # Calculate position size using risk management
-            volume = self.position_sizing.calculate_lot_size(
-                symbol, entry_price, stop_loss, risk_percent
-            )
-            
-            if volume > 0 and self.risk_manager.can_open_position(symbol):
-                # Place order
-                result = self.mt5_connector.place_order(
-                    symbol=symbol,
-                    order_type=order_type,
-                    volume=volume,
-                    price=entry_price,
-                    sl=stop_loss,
-                    tp=take_profit,
-                    comment=f"AuraTrade-{strategy_name}"
-                )
-                
-                if result:
-                    self.trades_today += 1
-                    self.last_trade_time = datetime.now()
-                    
-                    direction_text = "BUY" if signal_direction == 'buy' else "SELL"
-                    self.logger.info(f"✅ {strategy_name} trade executed: {symbol} {direction_text} - Confidence: {signal['confidence']:.1f}%")
-                    
-                    # Send notification
-                    if self.notifier:
-                        self.notifier.send_trade_alert(
-                            direction_text, symbol, volume, entry_price, 
-                            stop_loss, take_profit, strategy_name
-                        )
-                        
-                else:
-                    self.logger.warning(f"⚠️ Failed to place {strategy_name} order for {symbol}")
-            else:
-                self.logger.info(f"📊 {strategy_name} signal blocked by risk management: {symbol}")
-            
-        except Exception as e:
-            self.logger.error(f"❌ Error executing strategy trade: {e}")
-    
-    def _is_symbol_optimal_for_trading(self, symbol: str) -> bool:
-        """Check if symbol conditions are optimal for trading"""
+            self.logger.error(f"Error processing symbol {symbol}: {e}")
+
+    def _check_market_conditions(self, symbol_info: Dict[str, Any]) -> bool:
+        """Check if market conditions are suitable for trading"""
         try:
             # Check spread
-            spread = self.mt5_connector.get_spread(symbol)
-            if spread is None or spread > 2.0:  # Max 2 pip spread
+            spread_pips = symbol_info['spread'] * symbol_info['point'] * 10
+            if spread_pips > 3.0:
                 return False
-            
-            # Check if market is open
-            if not self.mt5_connector.is_market_open(symbol):
+
+            # Check trading hours (avoid low liquidity periods)
+            current_hour = datetime.now().hour
+            if current_hour < 8 or current_hour > 17:
                 return False
-            
-            # Check if we already have position in this symbol
-            positions = self.mt5_connector.get_positions()
-            for pos in positions:
-                if pos['symbol'] == symbol:
-                    return False  # One position per symbol for quality
-            
+
+            # Check volatility
+            if symbol_info.get('volume_high', 0) == 0:
+                return False
+
             return True
-            
+
         except Exception as e:
-            self.logger.error(f"❌ Error checking symbol optimization: {e}")
+            self.logger.error(f"Error checking market conditions: {e}")
             return False
-    
-    def _check_conservative_limits(self) -> bool:
-        """Check conservative limits for high win rate"""
+
+    def _execute_signal(self, symbol: str, signal: Dict[str, Any]):
+        """Execute trading signal"""
         try:
-            # Check win rate - stop if below target
-            if self.trades_today > 5 and self.win_rate < self.required_win_rate:
-                self.logger.warning(f"⚠️ Win rate below target: {self.win_rate:.1f}% < {self.required_win_rate}%")
-                return True
-            
-            # Limit daily trades for quality
-            if self.trades_today >= self.max_daily_trades:
-                self.logger.info(f"📈 Daily trade limit reached: {self.trades_today}")
-                return True
-            
-            # Stop after 2 consecutive losses to preserve win rate
-            if self.consecutive_losses >= 2:
-                self.logger.warning(f"⚠️ Consecutive losses limit: {self.consecutive_losses}")
-                return True
-            
-            # Check daily profit/loss limits
-            if self.daily_pnl <= -100:  # $100 daily loss limit
-                self.logger.warning(f"⚠️ Daily loss limit reached: ${self.daily_pnl:.2f}")
-                return True
-            
-            if self.daily_pnl >= 500:  # $500 daily profit target
-                self.logger.info(f"🎯 Daily profit target reached: ${self.daily_pnl:.2f}")
-                return True
-            
-            return False
-            
-        except Exception as e:
-            self.logger.error(f"❌ Error checking conservative limits: {e}")
-            return False
-    
-    def _update_market_data(self):
-        """Update market data for active symbols"""
-        try:
-            symbols = ['EURUSD', 'GBPUSD', 'USDJPY', 'XAUUSD']
-            for symbol in symbols:
-                # Update data in background - simplified
-                pass
-                
-        except Exception as e:
-            self.logger.error(f"❌ Error updating market data: {e}")
-    
-    def _monitor_positions(self):
-        """Monitor and manage existing positions"""
-        try:
-            positions = self.mt5_connector.get_positions()
-            
-            for position in positions:
-                # Implement trailing stops and position management
-                self._manage_position(position)
-                
-        except Exception as e:
-            self.logger.error(f"❌ Error monitoring positions: {e}")
-    
-    def _manage_position(self, position: Dict):
-        """Manage individual position for optimal results"""
-        try:
-            # Quick profit taking for scalping positions
-            if position['profit'] > 50:  # $50 profit
-                self.mt5_connector.close_position(position['ticket'])
-                self.logger.info(f"✅ Position closed with profit: ${position['profit']:.2f}")
-                
-        except Exception as e:
-            self.logger.error(f"❌ Error managing position: {e}")
-    
-    def _update_performance_metrics(self):
-        """Update performance tracking for win rate calculation"""
-        try:
-            positions = self.mt5_connector.get_positions()
-            
-            # Simple win rate calculation
-            if self.trades_today > 0:
-                self.win_rate = (self.winning_trades / self.trades_today) * 100
-            
-            # Update daily P&L
+            # Check total positions
+            total_positions = len(self.mt5_connector.get_positions())
+            if total_positions >= self.max_concurrent_trades:
+                return
+
+            # Calculate position size
             account_info = self.mt5_connector.get_account_info()
-            if account_info and hasattr(self, 'starting_equity'):
-                self.daily_pnl = account_info['equity'] - self.starting_equity
-            elif account_info:
-                self.starting_equity = account_info['equity']
-                
+            lot_size = self.position_sizing.calculate_lot_size(
+                symbol, signal['direction'], signal.get('confidence', 70)
+            )
+
+            if lot_size <= 0:
+                return
+
+            # Calculate SL/TP based on percentage
+            entry_price = signal['price']
+            balance = account_info['balance']
+
+            # Risk 2% of balance per trade
+            risk_amount = balance * 0.02
+            symbol_info = self.mt5_connector.get_symbol_info(symbol)
+
+            if signal['direction'] == 'BUY':
+                # Stop loss 1.5% below entry
+                sl_price = entry_price * 0.985
+                # Take profit 3% above entry (2:1 RR)
+                tp_price = entry_price * 1.03
+                order_type = 0  # BUY
+            else:
+                # Stop loss 1.5% above entry
+                sl_price = entry_price * 1.015
+                # Take profit 3% below entry
+                tp_price = entry_price * 0.97
+                order_type = 1  # SELL
+
+            # Place order
+            result = self.order_manager.place_order(
+                symbol=symbol,
+                order_type=order_type,
+                lot_size=lot_size,
+                price=entry_price,
+                sl=sl_price,
+                tp=tp_price,
+                comment=f"{signal['strategy']} - Conf: {signal['confidence']:.1f}%"
+            )
+
+            if result['success']:
+                self.trades_today += 1
+                self.logger.info(f"Order placed: {symbol} {signal['direction']} {lot_size} lots")
+
+                # Send notification
+                if self.notifier and self.notifier.enabled:
+                    message = (
+                        f"🎯 New Trade Opened\n"
+                        f"Symbol: {symbol}\n"
+                        f"Direction: {signal['direction']}\n"
+                        f"Lot Size: {lot_size}\n"
+                        f"Entry: {entry_price:.5f}\n"
+                        f"SL: {sl_price:.5f}\n"
+                        f"TP: {tp_price:.5f}\n"
+                        f"Strategy: {signal['strategy']}\n"
+                        f"Confidence: {signal['confidence']:.1f}%"
+                    )
+                    self.notifier.send_trade_alert(message)
+
         except Exception as e:
-            self.logger.error(f"❌ Error updating performance metrics: {e}")
-    
-    def _reset_daily_counters(self):
-        """Reset daily counters for new trading day"""
+            self.logger.error(f"Error executing signal: {e}")
+
+    def _manage_positions(self):
+        """Manage existing positions"""
         try:
-            now = datetime.now()
-            if not hasattr(self, 'last_reset_date') or self.last_reset_date.date() != now.date():
-                self.trades_today = 0
-                self.winning_trades = 0
-                self.losing_trades = 0
-                self.daily_pnl = 0.0
-                self.consecutive_losses = 0
-                self.win_rate = 0.0
-                self.last_reset_date = now
-                
-                # Get starting equity for the day
-                account_info = self.mt5_connector.get_account_info()
-                if account_info:
-                    self.starting_equity = account_info['equity']
-                    
-                self.logger.info("🔄 Daily counters reset for new trading day")
-                
-        except Exception as e:
-            self.logger.error(f"❌ Error resetting daily counters: {e}")
-    
-    def emergency_stop_all(self):
-        """Emergency stop - close all positions"""
-        try:
-            self.logger.warning("🚨 EMERGENCY STOP ACTIVATED")
-            self.emergency_stop = True
-            self.running = False
-            
-            # Close all positions
             positions = self.mt5_connector.get_positions()
+
             for position in positions:
-                self.mt5_connector.close_position(position['ticket'])
-            
-            if self.notifier:
-                self.notifier.send_message("🚨 EMERGENCY STOP - All positions closed")
-                
+                # Check for trailing stop
+                self._check_trailing_stop(position)
+
+                # Check for emergency close conditions
+                if position['profit'] < -500:  # Emergency close at $500 loss
+                    self.logger.warning(f"Emergency closing position {position['ticket']} due to large loss")
+                    self.mt5_connector.close_position(position['ticket'])
+
+                    if self.notifier and self.notifier.enabled:
+                        message = f"🚨 Emergency Close\nTicket: {position['ticket']}\nLoss: ${position['profit']:.2f}"
+                        self.notifier.send_trade_alert(message)
+
         except Exception as e:
-            self.logger.error(f"❌ Error during emergency stop: {e}")
-    
+            self.logger.error(f"Error managing positions: {e}")
+
+    def _check_trailing_stop(self, position: Dict[str, Any]):
+        """Check and update trailing stop"""
+        try:
+            symbol = position['symbol']
+            ticket = position['ticket']
+
+            symbol_info = self.mt5_connector.get_symbol_info(symbol)
+            if symbol_info is None:
+                return
+
+            current_price = symbol_info['bid'] if position['type'] == 0 else symbol_info['ask']
+            entry_price = position['price_open']
+            current_sl = position['sl']
+
+            # Only trail if in profit
+            if position['profit'] <= 0:
+                return
+
+            trailing_distance = entry_price * 0.01  # 1% trailing distance
+
+            if position['type'] == 0:  # BUY position
+                new_sl = current_price - trailing_distance
+                if current_sl == 0 or new_sl > current_sl:
+                    self.mt5_connector.modify_position(ticket, sl=new_sl, tp=position['tp'])
+                    self.logger.info(f"Trailing stop updated for {ticket}: {new_sl:.5f}")
+            else:  # SELL position
+                new_sl = current_price + trailing_distance
+                if current_sl == 0 or new_sl < current_sl:
+                    self.mt5_connector.modify_position(ticket, sl=new_sl, tp=position['tp'])
+                    self.logger.info(f"Trailing stop updated for {ticket}: {new_sl:.5f}")
+
+        except Exception as e:
+            self.logger.error(f"Error checking trailing stop: {e}")
+
+    def _update_performance(self):
+        """Update performance metrics"""
+        try:
+            account_info = self.mt5_connector.get_account_info()
+            current_balance = account_info.get('balance', 0.0)
+            self.daily_pnl = current_balance - self.start_balance
+
+            # Update win/loss statistics
+            # This would typically be done when positions are closed
+            # For now, we'll estimate based on current positions
+            positions = self.mt5_connector.get_positions()
+            winning_positions = len([p for p in positions if p['profit'] > 0])
+            losing_positions = len([p for p in positions if p['profit'] < 0])
+
+            total_trades = self.wins + self.losses
+            if total_trades > 0:
+                win_rate = (self.wins / total_trades) * 100
+            else:
+                win_rate = 0
+
+        except Exception as e:
+            self.logger.error(f"Error updating performance: {e}")
+
     def get_status(self) -> Dict[str, Any]:
-        """Get current engine status"""
-        return {
-            'running': self.running,
-            'paused': self.paused,
-            'emergency_stop': self.emergency_stop,
-            'trades_today': self.trades_today,
-            'win_rate': self.win_rate,
-            'daily_pnl': self.daily_pnl,
-            'consecutive_losses': self.consecutive_losses,
-            'target_win_rate': self.required_win_rate
-        }
+        """Get current trading engine status"""
+        try:
+            account_info = self.mt5_connector.get_account_info()
+            positions = self.mt5_connector.get_positions()
+
+            total_trades = self.wins + self.losses
+            win_rate = (self.wins / total_trades * 100) if total_trades > 0 else 0
+
+            return {
+                'running': self.running,
+                'connected': self.mt5_connector.is_connected(),
+                'balance': account_info.get('balance', 0.0),
+                'equity': account_info.get('equity', 0.0),
+                'free_margin': account_info.get('free_margin', 0.0),
+                'open_positions': len(positions),
+                'trades_today': self.trades_today,
+                'wins': self.wins,
+                'losses': self.losses,
+                'win_rate': win_rate,
+                'daily_pnl': self.daily_pnl,
+                'total_profit': sum([p['profit'] for p in positions])
+            }
+
+        except Exception as e:
+            self.logger.error(f"Error getting status: {e}")
+            return {
+                'running': self.running,
+                'connected': False,
+                'error': str(e)
+            }
