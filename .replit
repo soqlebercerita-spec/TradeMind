@@ -7,7 +7,7 @@ packages = ["glibcLocales"]
 run = ["sh", "-c", "python bot.py"]
 
 [workflows]
-runButton = "Run TradeMind Bot"
+runButton = "Run AuraTrade Bot"
 
 [[workflows.workflow]]
 name = "Run TradeMind Bot"
@@ -17,3 +17,12 @@ mode = "sequential"
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "cd TradeMind && python bot.py"
+
+[[workflows.workflow]]
+name = "Run AuraTrade Bot"
+author = 46019748
+mode = "sequential"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "cd AuraTrade && python bot.py"

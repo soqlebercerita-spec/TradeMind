@@ -162,3 +162,194 @@ class Notifier:
 ⏰ Time: {datetime.now().strftime('%H:%M:%S')}
         """
         return self.send_message(message.strip())
+"""
+Telegram notification system for AuraTrade Bot
+Sends alerts and updates via Telegram Bot API
+"""
+
+import requests
+import json
+from datetime import datetime
+from typing import Optional, Dict, Any
+from config.credentials import Credentials
+from utils.logger import Logger
+
+class TelegramNotifier:
+    """Telegram bot for sending notifications"""
+    
+    def __init__(self):
+        self.logger = Logger().get_logger()
+        self.credentials = Credentials()
+        
+        # Get Telegram credentials
+        self.bot_token = self.credentials.TELEGRAM['bot_token']
+        self.chat_id = self.credentials.TELEGRAM['chat_id']
+        
+        # API URL
+        self.api_url = f"https://api.telegram.org/bot{self.bot_token}"
+        
+        # Notification settings
+        self.enabled = self.credentials.TELEGRAM['notifications_enabled']
+        self.max_retries = 3
+        
+        if self.enabled and self.bot_token and self.chat_id:
+            self.logger.info("Telegram notifier initialized successfully")
+        else:
+            self.logger.warning("Telegram notifier disabled or not configured")
+    
+    def send_message(self, message: str, parse_mode: str = 'HTML') -> bool:
+        """Send a message to Telegram"""
+        if not self.enabled or not self.bot_token or not self.chat_id:
+            return False
+        
+        try:
+            url = f"{self.api_url}/sendMessage"
+            
+            payload = {
+                'chat_id': self.chat_id,
+                'text': message,
+                'parse_mode': parse_mode,
+                'disable_web_page_preview': True
+            }
+            
+            for attempt in range(self.max_retries):
+                try:
+                    response = requests.post(url, json=payload, timeout=10)
+                    
+                    if response.status_code == 200:
+                        return True
+                    else:
+                        self.logger.error(f"Telegram API error: {response.status_code} - {response.text}")
+                        
+                except requests.RequestException as e:
+                    self.logger.error(f"Request error (attempt {attempt + 1}): {e}")
+                    
+                if attempt < self.max_retries - 1:
+                    import time
+                    time.sleep(1)
+            
+            return False
+            
+        except Exception as e:
+            self.logger.error(f"Exception sending Telegram message: {e}")
+            return False
+    
+    def send_trade_alert(self, action: str, symbol: str, volume: float, 
+                        price: float, sl: float, tp: float, strategy: str) -> bool:
+        """Send trade execution alert"""
+        emoji = "🟢" if action.upper() == "BUY" else "🔴"
+        
+        message = (
+            f"{emoji} <b>TRADE EXECUTED</b>\n\n"
+            f"<b>Action:</b> {action.upper()}\n"
+            f"<b>Symbol:</b> {symbol}\n"
+            f"<b>Volume:</b> {volume} lots\n"
+            f"<b>Price:</b> {price}\n"
+            f"<b>Stop Loss:</b> {sl}\n"
+            f"<b>Take Profit:</b> {tp}\n"
+            f"<b>Strategy:</b> {strategy}\n"
+            f"<b>Time:</b> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+        )
+        
+        return self.send_message(message)
+    
+    def send_position_closed(self, symbol: str, profit: float, reason: str) -> bool:
+        """Send position closed alert"""
+        emoji = "💰" if profit > 0 else "💸"
+        
+        message = (
+            f"{emoji} <b>POSITION CLOSED</b>\n\n"
+            f"<b>Symbol:</b> {symbol}\n"
+            f"<b>Profit/Loss:</b> ${profit:.2f}\n"
+            f"<b>Reason:</b> {reason}\n"
+            f"<b>Time:</b> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+        )
+        
+        return self.send_message(message)
+    
+    def send_risk_alert(self, alert_type: str, details: Dict[str, Any]) -> bool:
+        """Send risk management alert"""
+        message = (
+            f"⚠️ <b>RISK ALERT</b>\n\n"
+            f"<b>Type:</b> {alert_type}\n"
+        )
+        
+        for key, value in details.items():
+            message += f"<b>{key.replace('_', ' ').title()}:</b> {value}\n"
+        
+        message += f"<b>Time:</b> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+        
+        return self.send_message(message)
+    
+    def send_emergency_stop(self, reason: str, positions_closed: int) -> bool:
+        """Send emergency stop alert"""
+        message = (
+            f"🚨 <b>EMERGENCY STOP TRIGGERED</b>\n\n"
+            f"<b>Reason:</b> {reason}\n"
+            f"<b>Positions Closed:</b> {positions_closed}\n"
+            f"<b>Time:</b> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+            f"All trading has been stopped!"
+        )
+        
+        return self.send_message(message)
+    
+    def send_daily_summary(self, summary: Dict[str, Any]) -> bool:
+        """Send daily trading summary"""
+        profit_emoji = "📈" if summary.get('total_profit', 0) > 0 else "📉"
+        
+        message = (
+            f"{profit_emoji} <b>DAILY SUMMARY</b>\n\n"
+            f"<b>Total Trades:</b> {summary.get('total_trades', 0)}\n"
+            f"<b>Winning Trades:</b> {summary.get('winning_trades', 0)}\n"
+            f"<b>Losing Trades:</b> {summary.get('losing_trades', 0)}\n"
+            f"<b>Win Rate:</b> {summary.get('win_rate', 0):.1f}%\n"
+            f"<b>Total Profit:</b> ${summary.get('total_profit', 0):.2f}\n"
+            f"<b>Max Drawdown:</b> {summary.get('max_drawdown', 0):.2f}%\n"
+            f"<b>Date:</b> {datetime.now().strftime('%Y-%m-%d')}"
+        )
+        
+        return self.send_message(message)
+    
+    def send_system_status(self, status: str, details: str = "") -> bool:
+        """Send system status update"""
+        status_emoji = {
+            'starting': '🟡',
+            'running': '🟢',
+            'stopped': '🔴',
+            'error': '❌',
+            'warning': '⚠️'
+        }
+        
+        emoji = status_emoji.get(status.lower(), '📊')
+        
+        message = (
+            f"{emoji} <b>SYSTEM STATUS</b>\n\n"
+            f"<b>Status:</b> {status.upper()}\n"
+        )
+        
+        if details:
+            message += f"<b>Details:</b> {details}\n"
+        
+        message += f"<b>Time:</b> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+        
+        return self.send_message(message)
+    
+    def test_connection(self) -> bool:
+        """Test Telegram bot connection"""
+        try:
+            if not self.enabled:
+                return False
+            
+            test_message = f"🤖 AuraTrade Bot Test Message\nTime: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+            result = self.send_message(test_message)
+            
+            if result:
+                self.logger.info("Telegram connection test successful")
+            else:
+                self.logger.error("Telegram connection test failed")
+            
+            return result
+            
+        except Exception as e:
+            self.logger.error(f"Exception testing Telegram connection: {e}")
+            return False

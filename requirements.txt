@@ -1,0 +1,30 @@
+
+# AuraTrade Bot - Python Dependencies
+# Core Trading Dependencies
+MetaTrader5>=5.0.45
+numpy>=1.24.0
+pandas>=2.0.0
+requests>=2.31.0
+
+# GUI Dependencies
+PyQt5>=5.15.0
+matplotlib>=3.7.0
+pyqtgraph>=0.13.0
+
+# Machine Learning Dependencies
+scikit-learn>=1.3.0
+xgboost>=1.7.0
+
+# NLP Dependencies for Sentiment Analysis
+vaderSentiment>=3.3.0
+transformers>=4.30.0
+torch>=2.0.0
+
+# Data Processing
+scipy>=1.10.0
+ta>=0.10.0
+
+# Utilities
+python-dotenv>=1.0.0
+schedule>=1.2.0
+websocket-client>=1.6.0

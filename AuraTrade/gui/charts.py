@@ -290,3 +290,167 @@ class CandlestickItem(pg.GraphicsObject):
         max_price = max(highs[~np.isnan(highs)])
         
         return QRectF(min_time, min_price, max_time - min_time, max_price - min_price)
+"""
+Live chart integration for AuraTrade Bot GUI
+Displays real-time price charts with technical indicators
+"""
+
+import pyqtgraph as pg
+from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QComboBox, QLabel
+from PyQt5.QtCore import QTimer, pyqtSignal
+import numpy as np
+from datetime import datetime, timedelta
+from typing import Dict, List, Optional, Any
+
+class TradingChartWidget(QWidget):
+    """Real-time trading chart widget"""
+    
+    symbol_changed = pyqtSignal(str)
+    
+    def __init__(self, data_manager, parent=None):
+        super().__init__(parent)
+        self.data_manager = data_manager
+        self.current_symbol = "EURUSD"
+        self.current_timeframe = "M15"
+        
+        self.setup_ui()
+        self.setup_chart()
+        self.setup_timer()
+        
+    def setup_ui(self):
+        """Setup the user interface"""
+        layout = QVBoxLayout(self)
+        
+        # Control panel
+        control_layout = QHBoxLayout()
+        
+        # Symbol selector
+        control_layout.addWidget(QLabel("Symbol:"))
+        self.symbol_combo = QComboBox()
+        self.symbol_combo.addItems(["EURUSD", "GBPUSD", "USDJPY", "AUDUSD", "XAUUSD", "BTCUSD"])
+        self.symbol_combo.currentTextChanged.connect(self.on_symbol_changed)
+        control_layout.addWidget(self.symbol_combo)
+        
+        # Timeframe selector
+        control_layout.addWidget(QLabel("Timeframe:"))
+        self.timeframe_combo = QComboBox()
+        self.timeframe_combo.addItems(["M1", "M5", "M15", "M30", "H1", "H4", "D1"])
+        self.timeframe_combo.setCurrentText("M15")
+        self.timeframe_combo.currentTextChanged.connect(self.on_timeframe_changed)
+        control_layout.addWidget(self.timeframe_combo)
+        
+        # Refresh button
+        self.refresh_btn = QPushButton("Refresh")
+        self.refresh_btn.clicked.connect(self.refresh_chart)
+        control_layout.addWidget(self.refresh_btn)
+        
+        control_layout.addStretch()
+        layout.addLayout(control_layout)
+        
+        # Chart widget
+        self.chart_widget = pg.PlotWidget()
+        self.chart_widget.setBackground('black')
+        self.chart_widget.showGrid(x=True, y=True, alpha=0.3)
+        layout.addWidget(self.chart_widget)
+        
+    def setup_chart(self):
+        """Setup the chart plotting"""
+        # Main price plot
+        self.price_plot = self.chart_widget.plot(pen=pg.mkPen('cyan', width=2))
+        
+        # Moving averages
+        self.sma20_plot = self.chart_widget.plot(pen=pg.mkPen('yellow', width=1))
+        self.sma50_plot = self.chart_widget.plot(pen=pg.mkPen('orange', width=1))
+        
+        # Support/Resistance lines
+        self.support_line = pg.InfiniteLine(angle=0, pen=pg.mkPen('green', width=2, style=pg.QtCore.Qt.DashLine))
+        self.resistance_line = pg.InfiniteLine(angle=0, pen=pg.mkPen('red', width=2, style=pg.QtCore.Qt.DashLine))
+        
+        self.chart_widget.addItem(self.support_line)
+        self.chart_widget.addItem(self.resistance_line)
+        
+        # Labels
+        self.chart_widget.setLabel('left', 'Price')
+        self.chart_widget.setLabel('bottom', 'Time')
+        self.chart_widget.setTitle(f'{self.current_symbol} - {self.current_timeframe}')
+        
+    def setup_timer(self):
+        """Setup timer for real-time updates"""
+        self.update_timer = QTimer()
+        self.update_timer.timeout.connect(self.update_chart)
+        self.update_timer.start(5000)  # Update every 5 seconds
+        
+    def on_symbol_changed(self, symbol: str):
+        """Handle symbol change"""
+        self.current_symbol = symbol
+        self.symbol_changed.emit(symbol)
+        self.refresh_chart()
+        
+    def on_timeframe_changed(self, timeframe: str):
+        """Handle timeframe change"""
+        self.current_timeframe = timeframe
+        self.refresh_chart()
+        
+    def update_chart(self):
+        """Update chart with latest data"""
+        try:
+            # Get latest data from data manager
+            data = self.data_manager.get_latest_data(self.current_symbol, self.current_timeframe, 200)
+            
+            if data is not None and len(data) > 0:
+                # Extract time and price data
+                times = np.arange(len(data))
+                prices = data['close'].values
+                
+                # Update main price plot
+                self.price_plot.setData(times, prices)
+                
+                # Calculate and plot moving averages
+                if len(prices) >= 20:
+                    sma20 = np.convolve(prices, np.ones(20)/20, mode='valid')
+                    sma20_times = times[19:]
+                    self.sma20_plot.setData(sma20_times, sma20)
+                
+                if len(prices) >= 50:
+                    sma50 = np.convolve(prices, np.ones(50)/50, mode='valid')
+                    sma50_times = times[49:]
+                    self.sma50_plot.setData(sma50_times, sma50)
+                
+                # Update support/resistance levels
+                recent_high = np.max(prices[-50:]) if len(prices) >= 50 else np.max(prices)
+                recent_low = np.min(prices[-50:]) if len(prices) >= 50 else np.min(prices)
+                
+                self.resistance_line.setPos(recent_high)
+                self.support_line.setPos(recent_low)
+                
+                # Update title with current price
+                current_price = prices[-1]
+                self.chart_widget.setTitle(f'{self.current_symbol} - {self.current_timeframe} - {current_price:.5f}')
+                
+        except Exception as e:
+            print(f"Error updating chart: {e}")
+    
+    def refresh_chart(self):
+        """Force refresh the chart"""
+        self.update_chart()
+    
+    def add_trade_marker(self, price: float, trade_type: str, time_index: int = None):
+        """Add trade entry/exit marker to chart"""
+        try:
+            if time_index is None:
+                time_index = len(self.price_plot.getData()[0]) - 1
+            
+            color = 'green' if trade_type.lower() == 'buy' else 'red'
+            symbol = '▲' if trade_type.lower() == 'buy' else '▼'
+            
+            # Add scatter plot for trade marker
+            scatter = pg.ScatterPlotItem([time_index], [price], 
+                                       pen=pg.mkPen(color, width=2),
+                                       brush=pg.mkBrush(color),
+                                       size=15,
+                                       symbol=symbol)
+            
+            self.chart_widget.addItem(scatter)
+            
+        except Exception as e:
+            print(f"Error adding trade marker: {e}")
