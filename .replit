@@ -4,3 +4,15 @@ channel = "stable-25_05"
 
 [deployment]
 run = ["sh", "-c", "python bot.py"]
+
+[workflows]
+runButton = "Run TradeMind Bot"
+
+[[workflows.workflow]]
+name = "Run TradeMind Bot"
+author = 46019748
+mode = "sequential"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "cd TradeMind && python bot.py"
