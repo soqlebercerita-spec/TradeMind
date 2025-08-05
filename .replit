@@ -25,7 +25,7 @@ mode = "sequential"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "cd AuraTrade && python3 bot.py"
+args = "cd AuraTrade && python bot.py"
 
 [[workflows.workflow]]
 name = "Install Dependencies"
