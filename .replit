@@ -1,4 +1,4 @@
-run = "python bot.py"
+run = "cd AuraTrade && python bot.py"
 [nix]
 channel = "stable-25_05"
 packages = ["glibcLocales"]
@@ -25,7 +25,7 @@ mode = "sequential"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "cd AuraTrade && python3 bot.py"
+args = "cd AuraTrade && python bot.py"
 
 [[workflows.workflow]]
 name = "Install Dependencies"

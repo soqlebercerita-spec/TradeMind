@@ -188,3 +188,108 @@ class Logger:
     def log_error_with_context(self, error: Exception, context: str):
         """Log error with additional context"""
         self._logger.error(f"ERROR in {context}: {str(error)}", exc_info=True)
+"""
+Advanced logging system for AuraTrade Bot
+Implements multiple log levels and file rotation
+"""
+
+import logging
+import os
+from datetime import datetime
+from logging.handlers import RotatingFileHandler
+
+class Logger:
+    """Professional logging system for AuraTrade"""
+    
+    _instance = None
+    _logger = None
+    
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super(Logger, cls).__new__(cls)
+            cls._instance._setup_logger()
+        return cls._instance
+    
+    def _setup_logger(self):
+        """Setup comprehensive logging system"""
+        # Create logs directory
+        os.makedirs('AuraTrade/logs', exist_ok=True)
+        
+        # Create logger
+        self._logger = logging.getLogger('AuraTrade')
+        self._logger.setLevel(logging.DEBUG)
+        
+        # Clear existing handlers
+        self._logger.handlers.clear()
+        
+        # Console handler with colors
+        console_handler = logging.StreamHandler()
+        console_handler.setLevel(logging.INFO)
+        
+        # File handlers
+        info_handler = RotatingFileHandler(
+            'AuraTrade/logs/auratrade.log', 
+            maxBytes=10*1024*1024,  # 10MB
+            backupCount=5
+        )
+        info_handler.setLevel(logging.INFO)
+        
+        error_handler = RotatingFileHandler(
+            'AuraTrade/logs/errors.log',
+            maxBytes=5*1024*1024,  # 5MB
+            backupCount=3
+        )
+        error_handler.setLevel(logging.ERROR)
+        
+        trade_handler = RotatingFileHandler(
+            'AuraTrade/logs/trades.log',
+            maxBytes=10*1024*1024,  # 10MB
+            backupCount=10
+        )
+        trade_handler.setLevel(logging.INFO)
+        
+        # Formatters
+        detailed_formatter = logging.Formatter(
+            '%(asctime)s | %(levelname)-8s | %(name)s | %(message)s',
+            datefmt='%Y-%m-%d %H:%M:%S'
+        )
+        
+        console_formatter = logging.Formatter(
+            '%(asctime)s | %(levelname)-8s | %(message)s',
+            datefmt='%H:%M:%S'
+        )
+        
+        # Apply formatters
+        console_handler.setFormatter(console_formatter)
+        info_handler.setFormatter(detailed_formatter)
+        error_handler.setFormatter(detailed_formatter)
+        trade_handler.setFormatter(detailed_formatter)
+        
+        # Add handlers
+        self._logger.addHandler(console_handler)
+        self._logger.addHandler(info_handler)
+        self._logger.addHandler(error_handler)
+        
+        # Add trade logger
+        self.trade_logger = logging.getLogger('AuraTrade.Trades')
+        self.trade_logger.addHandler(trade_handler)
+    
+    def get_logger(self):
+        """Get main logger instance"""
+        return self._logger
+    
+    def get_trade_logger(self):
+        """Get trade-specific logger"""
+        return self.trade_logger
+    
+    def log_trade(self, action, symbol, volume, price, sl=None, tp=None, profit=None):
+        """Log trading activity"""
+        trade_info = f"{action} | {symbol} | Vol: {volume} | Price: {price}"
+        if sl:
+            trade_info += f" | SL: {sl}"
+        if tp:
+            trade_info += f" | TP: {tp}"
+        if profit is not None:
+            trade_info += f" | P&L: ${profit:.2f}"
+        
+        self.trade_logger.info(trade_info)

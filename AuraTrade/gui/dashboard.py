@@ -841,3 +841,475 @@ class TradingDashboard(QWidget):
         lines = self.log_text.toPlainText().split('\n')
         if len(lines) > 100:
             self.log_text.setPlainText('\n'.join(lines[-100:]))
+"""
+Professional Trading Dashboard for AuraTrade Bot
+Real-time monitoring and control interface
+"""
+
+from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
+                           QGroupBox, QLabel, QPushButton, QTableWidget, 
+                           QTableWidgetItem, QTextEdit, QProgressBar,
+                           QFrame, QSplitter, QTabWidget)
+from PyQt5.QtCore import Qt, QTimer, pyqtSignal
+from PyQt5.QtGui import QFont, QPalette, QColor
+from datetime import datetime
+from utils.logger import Logger
+
+class TradingDashboard(QWidget):
+    """Professional trading dashboard with real-time updates"""
+    
+    emergency_stop_requested = pyqtSignal()
+    
+    def __init__(self, trading_engine, order_manager, risk_manager, parent=None):
+        super().__init__(parent)
+        
+        self.trading_engine = trading_engine
+        self.order_manager = order_manager
+        self.risk_manager = risk_manager
+        self.logger = Logger().get_logger()
+        
+        self.setup_ui()
+        self.setup_timers()
+        
+    def setup_ui(self):
+        """Setup dashboard UI"""
+        layout = QVBoxLayout(self)
+        
+        # Top row - Account info and controls
+        top_layout = QHBoxLayout()
+        
+        # Account info
+        self.account_group = self.create_account_info_group()
+        top_layout.addWidget(self.account_group)
+        
+        # Performance metrics
+        self.performance_group = self.create_performance_group()
+        top_layout.addWidget(self.performance_group)
+        
+        # Control buttons
+        self.control_group = self.create_control_group()
+        top_layout.addWidget(self.control_group)
+        
+        layout.addLayout(top_layout)
+        
+        # Middle section - Tables
+        middle_splitter = QSplitter(Qt.Horizontal)
+        
+        # Positions table
+        self.positions_group = self.create_positions_group()
+        middle_splitter.addWidget(self.positions_group)
+        
+        # Orders table
+        self.orders_group = self.create_orders_group()
+        middle_splitter.addWidget(self.orders_group)
+        
+        layout.addWidget(middle_splitter)
+        
+        # Bottom section - Logs
+        self.logs_group = self.create_logs_group()
+        layout.addWidget(self.logs_group)
+        
+    def create_account_info_group(self):
+        """Create account information group"""
+        group = QGroupBox("Account Information")
+        layout = QGridLayout(group)
+        
+        # Labels
+        self.balance_label = QLabel("$0.00")
+        self.equity_label = QLabel("$0.00")
+        self.margin_label = QLabel("$0.00")
+        self.free_margin_label = QLabel("$0.00")
+        self.margin_level_label = QLabel("0.00%")
+        
+        # Style labels
+        font = QFont()
+        font.setPointSize(12)
+        font.setBold(True)
+        
+        for label in [self.balance_label, self.equity_label, self.margin_label,
+                     self.free_margin_label, self.margin_level_label]:
+            label.setFont(font)
+            label.setAlignment(Qt.AlignCenter)
+        
+        # Layout
+        layout.addWidget(QLabel("Balance:"), 0, 0)
+        layout.addWidget(self.balance_label, 0, 1)
+        layout.addWidget(QLabel("Equity:"), 1, 0)
+        layout.addWidget(self.equity_label, 1, 1)
+        layout.addWidget(QLabel("Margin:"), 2, 0)
+        layout.addWidget(self.margin_label, 2, 1)
+        layout.addWidget(QLabel("Free Margin:"), 3, 0)
+        layout.addWidget(self.free_margin_label, 3, 1)
+        layout.addWidget(QLabel("Margin Level:"), 4, 0)
+        layout.addWidget(self.margin_level_label, 4, 1)
+        
+        return group
+    
+    def create_performance_group(self):
+        """Create performance metrics group"""
+        group = QGroupBox("Performance Metrics")
+        layout = QGridLayout(group)
+        
+        # Labels
+        self.trades_today_label = QLabel("0")
+        self.win_rate_label = QLabel("0.0%")
+        self.daily_pnl_label = QLabel("$0.00")
+        self.drawdown_label = QLabel("0.0%")
+        self.profit_factor_label = QLabel("0.00")
+        
+        # Style labels
+        font = QFont()
+        font.setPointSize(12)
+        font.setBold(True)
+        
+        for label in [self.trades_today_label, self.win_rate_label, 
+                     self.daily_pnl_label, self.drawdown_label, self.profit_factor_label]:
+            label.setFont(font)
+            label.setAlignment(Qt.AlignCenter)
+        
+        # Progress bar for win rate
+        self.win_rate_progress = QProgressBar()
+        self.win_rate_progress.setMaximum(100)
+        self.win_rate_progress.setValue(0)
+        
+        # Layout
+        layout.addWidget(QLabel("Trades Today:"), 0, 0)
+        layout.addWidget(self.trades_today_label, 0, 1)
+        layout.addWidget(QLabel("Win Rate:"), 1, 0)
+        layout.addWidget(self.win_rate_label, 1, 1)
+        layout.addWidget(self.win_rate_progress, 2, 0, 1, 2)
+        layout.addWidget(QLabel("Daily P&L:"), 3, 0)
+        layout.addWidget(self.daily_pnl_label, 3, 1)
+        layout.addWidget(QLabel("Drawdown:"), 4, 0)
+        layout.addWidget(self.drawdown_label, 4, 1)
+        
+        return group
+    
+    def create_control_group(self):
+        """Create control buttons group"""
+        group = QGroupBox("Trading Controls")
+        layout = QVBoxLayout(group)
+        
+        # Start/Stop buttons
+        self.start_button = QPushButton("START TRADING")
+        self.stop_button = QPushButton("STOP TRADING")
+        self.emergency_button = QPushButton("🚨 EMERGENCY STOP")
+        
+        # Style buttons
+        self.start_button.setStyleSheet("""
+            QPushButton {
+                background-color: #4CAF50;
+                font-size: 14px;
+                font-weight: bold;
+                padding: 10px;
+                border-radius: 5px;
+            }
+            QPushButton:hover {
+                background-color: #45a049;
+            }
+        """)
+        
+        self.stop_button.setStyleSheet("""
+            QPushButton {
+                background-color: #f44336;
+                font-size: 14px;
+                font-weight: bold;
+                padding: 10px;
+                border-radius: 5px;
+            }
+            QPushButton:hover {
+                background-color: #da190b;
+            }
+        """)
+        
+        self.emergency_button.setStyleSheet("""
+            QPushButton {
+                background-color: #ff5722;
+                font-size: 16px;
+                font-weight: bold;
+                padding: 15px;
+                border-radius: 5px;
+            }
+            QPushButton:hover {
+                background-color: #e64a19;
+                animation: blink 1s linear infinite;
+            }
+        """)
+        
+        # Connect signals
+        self.start_button.clicked.connect(self.start_trading)
+        self.stop_button.clicked.connect(self.stop_trading)
+        self.emergency_button.clicked.connect(self.emergency_stop)
+        
+        layout.addWidget(self.start_button)
+        layout.addWidget(self.stop_button)
+        layout.addWidget(self.emergency_button)
+        
+        # Status indicator
+        self.status_label = QLabel("Status: STOPPED")
+        self.status_label.setAlignment(Qt.AlignCenter)
+        self.status_label.setStyleSheet("font-weight: bold; color: red;")
+        layout.addWidget(self.status_label)
+        
+        return group
+    
+    def create_positions_group(self):
+        """Create positions table group"""
+        group = QGroupBox("Open Positions")
+        layout = QVBoxLayout(group)
+        
+        self.positions_table = QTableWidget()
+        self.positions_table.setColumnCount(8)
+        self.positions_table.setHorizontalHeaderLabels([
+            "Ticket", "Symbol", "Type", "Volume", "Price", "S/L", "T/P", "Profit"
+        ])
+        
+        # Style table
+        self.positions_table.setAlternatingRowColors(True)
+        self.positions_table.setSelectionBehavior(QTableWidget.SelectRows)
+        
+        layout.addWidget(self.positions_table)
+        
+        return group
+    
+    def create_orders_group(self):
+        """Create orders table group"""
+        group = QGroupBox("Recent Orders")
+        layout = QVBoxLayout(group)
+        
+        self.orders_table = QTableWidget()
+        self.orders_table.setColumnCount(7)
+        self.orders_table.setHorizontalHeaderLabels([
+            "Time", "Symbol", "Type", "Volume", "Price", "S/L", "T/P"
+        ])
+        
+        # Style table
+        self.orders_table.setAlternatingRowColors(True)
+        self.orders_table.setSelectionBehavior(QTableWidget.SelectRows)
+        
+        layout.addWidget(self.orders_table)
+        
+        return group
+    
+    def create_logs_group(self):
+        """Create logs display group"""
+        group = QGroupBox("System Logs")
+        layout = QVBoxLayout(group)
+        
+        self.logs_text = QTextEdit()
+        self.logs_text.setMaximumHeight(150)
+        self.logs_text.setReadOnly(True)
+        
+        layout.addWidget(self.logs_text)
+        
+        return group
+    
+    def setup_timers(self):
+        """Setup update timers"""
+        # Main update timer
+        self.update_timer = QTimer()
+        self.update_timer.timeout.connect(self.update_dashboard)
+        self.update_timer.start(2000)  # Update every 2 seconds
+        
+        # Fast update timer for critical data
+        self.fast_timer = QTimer()
+        self.fast_timer.timeout.connect(self.update_fast_data)
+        self.fast_timer.start(500)  # Update every 0.5 seconds
+    
+    def update_dashboard(self):
+        """Update dashboard data"""
+        try:
+            self.update_account_info()
+            self.update_positions_table()
+            self.update_orders_table()
+            self.update_performance_metrics()
+            self.update_logs()
+            
+        except Exception as e:
+            self.logger.error(f"Error updating dashboard: {e}")
+    
+    def update_fast_data(self):
+        """Update time-critical data"""
+        try:
+            self.update_trading_status()
+            
+        except Exception as e:
+            self.logger.error(f"Error updating fast data: {e}")
+    
+    def update_account_info(self):
+        """Update account information"""
+        try:
+            if hasattr(self.trading_engine, 'mt5_connector'):
+                account_info = self.trading_engine.mt5_connector.get_account_info()
+                
+                if account_info:
+                    self.balance_label.setText(f"${account_info.get('balance', 0):.2f}")
+                    self.equity_label.setText(f"${account_info.get('equity', 0):.2f}")
+                    self.margin_label.setText(f"${account_info.get('margin', 0):.2f}")
+                    self.free_margin_label.setText(f"${account_info.get('margin_free', 0):.2f}")
+                    
+                    margin_level = account_info.get('margin_level', 0)
+                    self.margin_level_label.setText(f"{margin_level:.2f}%")
+                    
+                    # Color coding for margin level
+                    if margin_level < 100:
+                        self.margin_level_label.setStyleSheet("color: red; font-weight: bold;")
+                    elif margin_level < 200:
+                        self.margin_level_label.setStyleSheet("color: orange; font-weight: bold;")
+                    else:
+                        self.margin_level_label.setStyleSheet("color: green; font-weight: bold;")
+                        
+        except Exception as e:
+            self.logger.error(f"Error updating account info: {e}")
+    
+    def update_performance_metrics(self):
+        """Update performance metrics"""
+        try:
+            if hasattr(self.trading_engine, 'get_status'):
+                status = self.trading_engine.get_status()
+                
+                self.trades_today_label.setText(str(status.get('trades_today', 0)))
+                
+                win_rate = status.get('win_rate', 0)
+                self.win_rate_label.setText(f"{win_rate:.1f}%")
+                self.win_rate_progress.setValue(int(win_rate))
+                
+                # Color coding for win rate
+                if win_rate >= 85:
+                    self.win_rate_progress.setStyleSheet("QProgressBar::chunk { background-color: green; }")
+                elif win_rate >= 70:
+                    self.win_rate_progress.setStyleSheet("QProgressBar::chunk { background-color: orange; }")
+                else:
+                    self.win_rate_progress.setStyleSheet("QProgressBar::chunk { background-color: red; }")
+                
+                daily_pnl = status.get('daily_pnl', 0)
+                self.daily_pnl_label.setText(f"${daily_pnl:.2f}")
+                
+                # Color coding for P&L
+                if daily_pnl > 0:
+                    self.daily_pnl_label.setStyleSheet("color: green; font-weight: bold;")
+                elif daily_pnl < 0:
+                    self.daily_pnl_label.setStyleSheet("color: red; font-weight: bold;")
+                else:
+                    self.daily_pnl_label.setStyleSheet("color: white; font-weight: bold;")
+                    
+        except Exception as e:
+            self.logger.error(f"Error updating performance metrics: {e}")
+    
+    def update_positions_table(self):
+        """Update positions table"""
+        try:
+            if hasattr(self.trading_engine, 'mt5_connector'):
+                positions = self.trading_engine.mt5_connector.get_positions()
+                
+                self.positions_table.setRowCount(len(positions))
+                
+                for row, position in enumerate(positions):
+                    self.positions_table.setItem(row, 0, QTableWidgetItem(str(position.get('ticket', ''))))
+                    self.positions_table.setItem(row, 1, QTableWidgetItem(position.get('symbol', '')))
+                    self.positions_table.setItem(row, 2, QTableWidgetItem('BUY' if position.get('type', 0) == 0 else 'SELL'))
+                    self.positions_table.setItem(row, 3, QTableWidgetItem(f"{position.get('volume', 0):.2f}"))
+                    self.positions_table.setItem(row, 4, QTableWidgetItem(f"{position.get('price_open', 0):.5f}"))
+                    self.positions_table.setItem(row, 5, QTableWidgetItem(f"{position.get('sl', 0):.5f}"))
+                    self.positions_table.setItem(row, 6, QTableWidgetItem(f"{position.get('tp', 0):.5f}"))
+                    
+                    profit = position.get('profit', 0)
+                    profit_item = QTableWidgetItem(f"${profit:.2f}")
+                    
+                    # Color coding for profit
+                    if profit > 0:
+                        profit_item.setBackground(QColor(0, 255, 0, 50))
+                    elif profit < 0:
+                        profit_item.setBackground(QColor(255, 0, 0, 50))
+                    
+                    self.positions_table.setItem(row, 7, profit_item)
+                    
+        except Exception as e:
+            self.logger.error(f"Error updating positions table: {e}")
+    
+    def update_orders_table(self):
+        """Update orders table"""
+        try:
+            if hasattr(self.order_manager, 'recent_orders'):
+                orders = getattr(self.order_manager, 'recent_orders', [])[-10:]  # Last 10 orders
+                
+                self.orders_table.setRowCount(len(orders))
+                
+                for row, order in enumerate(orders):
+                    self.orders_table.setItem(row, 0, QTableWidgetItem(order.get('time', '')))
+                    self.orders_table.setItem(row, 1, QTableWidgetItem(order.get('symbol', '')))
+                    self.orders_table.setItem(row, 2, QTableWidgetItem(order.get('type', '')))
+                    self.orders_table.setItem(row, 3, QTableWidgetItem(f"{order.get('volume', 0):.2f}"))
+                    self.orders_table.setItem(row, 4, QTableWidgetItem(f"{order.get('price', 0):.5f}"))
+                    self.orders_table.setItem(row, 5, QTableWidgetItem(f"{order.get('sl', 0):.5f}"))
+                    self.orders_table.setItem(row, 6, QTableWidgetItem(f"{order.get('tp', 0):.5f}"))
+                    
+        except Exception as e:
+            self.logger.error(f"Error updating orders table: {e}")
+    
+    def update_trading_status(self):
+        """Update trading status"""
+        try:
+            if hasattr(self.trading_engine, 'running'):
+                if self.trading_engine.running:
+                    self.status_label.setText("Status: ACTIVE")
+                    self.status_label.setStyleSheet("font-weight: bold; color: green;")
+                else:
+                    self.status_label.setText("Status: STOPPED")
+                    self.status_label.setStyleSheet("font-weight: bold; color: red;")
+                    
+        except Exception as e:
+            self.logger.error(f"Error updating trading status: {e}")
+    
+    def update_logs(self):
+        """Update logs display"""
+        try:
+            # This would read from log files in a real implementation
+            current_time = datetime.now().strftime("%H:%M:%S")
+            log_text = f"[{current_time}] Dashboard updated successfully\n"
+            
+            # Keep only last 50 lines
+            current_text = self.logs_text.toPlainText()
+            lines = current_text.split('\n')
+            if len(lines) > 50:
+                lines = lines[-49:]  # Keep last 49 + new line = 50
+            
+            new_text = '\n'.join(lines) + log_text
+            self.logs_text.setPlainText(new_text)
+            
+            # Auto-scroll to bottom
+            cursor = self.logs_text.textCursor()
+            cursor.movePosition(cursor.End)
+            self.logs_text.setTextCursor(cursor)
+            
+        except Exception as e:
+            self.logger.error(f"Error updating logs: {e}")
+    
+    def start_trading(self):
+        """Start trading via dashboard"""
+        try:
+            if hasattr(self.trading_engine, 'start'):
+                self.trading_engine.start()
+                self.logger.info("Trading started via dashboard")
+                
+        except Exception as e:
+            self.logger.error(f"Error starting trading: {e}")
+    
+    def stop_trading(self):
+        """Stop trading via dashboard"""
+        try:
+            if hasattr(self.trading_engine, 'stop'):
+                self.trading_engine.stop()
+                self.logger.info("Trading stopped via dashboard")
+                
+        except Exception as e:
+            self.logger.error(f"Error stopping trading: {e}")
+    
+    def emergency_stop(self):
+        """Emergency stop via dashboard"""
+        try:
+            self.emergency_stop_requested.emit()
+            self.logger.warning("Emergency stop requested via dashboard")
+            
+        except Exception as e:
+            self.logger.error(f"Error during emergency stop: {e}")

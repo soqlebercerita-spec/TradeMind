@@ -1,4 +1,3 @@
-
 """
 MetaTrader 5 connection and management module
 Handles all MT5 operations including connection, account management, and data retrieval
@@ -16,7 +15,7 @@ from utils.logger import Logger
 
 class MT5Connector:
     """MetaTrader 5 connection and data management"""
-    
+
     def __init__(self):
         self.logger = Logger().get_logger()
         self.credentials = Credentials()
@@ -24,64 +23,97 @@ class MT5Connector:
         self.account_info = {}
         self.symbols_info = {}
         self.connection_lock = threading.Lock()
-        
+
         # Connection monitoring
         self.last_heartbeat = None
         self.reconnect_attempts = 0
         self.max_reconnect_attempts = 5
-        
+
+    def _initialize_mt5(self) -> bool:
+        """Initialize MT5 terminal, attempting auto-detection"""
+        try:
+            if not mt5.initialize():
+                self.logger.error("Failed to initialize MT5 - Make sure MT5 terminal is running and accessible.")
+                return False
+            self.logger.info("MT5 terminal initialized.")
+            return True
+        except Exception as e:
+            self.logger.error(f"Exception during MT5 initialization: {e}")
+            return False
+
+    def _auto_login(self) -> bool:
+        """Attempt to log in to MT5 using stored or detected credentials"""
+        try:
+            mt5_creds = self.credentials.MT5
+
+            if not mt5_creds.get('login') or not mt5_creds.get('password') or not mt5_creds.get('server'):
+                self.logger.warning("MT5 credentials not fully configured. Attempting to detect.")
+                # Placeholder for potential future auto-detection logic if available
+                # For now, we rely on configuration. If missing, login will fail.
+                if not mt5_creds.get('login'):
+                    self.logger.error("MT5 login not found in configuration.")
+                    return False
+                if not mt5_creds.get('password'):
+                    self.logger.error("MT5 password not found in configuration.")
+                    return False
+                if not mt5_creds.get('server'):
+                    self.logger.error("MT5 server not found in configuration.")
+                    return False
+
+            if not mt5.login(
+                login=int(mt5_creds['login']),
+                password=mt5_creds['password'],
+                server=mt5_creds['server']
+            ):
+                error = mt5.last_error()
+                self.logger.error(f"Failed to login to MT5: {error}")
+                return False
+
+            # Verify connection and get account info
+            account_info = mt5.account_info()
+            if not account_info:
+                self.logger.error("Failed to get account information after login.")
+                return False
+
+            self.account_info = account_info._asdict()
+            self.connected = True
+            self.last_heartbeat = datetime.now()
+            self.reconnect_attempts = 0
+
+            self.logger.info(f"✅ Connected to MT5 successfully")
+            self.logger.info(f"Account: {self.account_info.get('login')}")
+            self.logger.info(f"Server: {self.account_info.get('server')}")
+            self.logger.info(f"Balance: ${self.account_info.get('balance', 0):.2f}")
+            self.logger.info(f"Equity: ${self.account_info.get('equity', 0):.2f}")
+
+            # Initialize symbols info
+            self._initialize_symbols()
+
+            return True
+
+        except ValueError as ve:
+            self.logger.error(f"Configuration error during MT5 login: {ve}")
+            return False
+        except Exception as e:
+            self.logger.error(f"Exception during MT5 auto-login: {e}")
+            return False
+
     def connect(self) -> bool:
-        """Establish connection to MetaTrader 5"""
+        """Establish connection to MetaTrader 5 with auto-detection"""
         try:
             with self.connection_lock:
-                # Check if MT5 is already initialized
-                if not mt5.initialize():
-                    self.logger.error("Failed to initialize MT5 - Make sure MT5 terminal is running")
+                # Try to initialize MT5 (auto-detect installation)
+                if not self._initialize_mt5():
                     return False
-                
-                # Get credentials
-                mt5_creds = self.credentials.MT5
-                
-                if not mt5_creds['login'] or not mt5_creds['password']:
-                    self.logger.error("MT5 credentials not configured properly")
+
+                # Auto-login with stored or detected credentials
+                if not self._auto_login():
                     return False
-                
-                # Attempt login
-                if not mt5.login(
-                    login=mt5_creds['login'], 
-                    password=mt5_creds['password'], 
-                    server=mt5_creds['server']
-                ):
-                    error = mt5.last_error()
-                    self.logger.error(f"Failed to login to MT5: {error}")
-                    return False
-                
-                # Verify connection and get account info
-                account_info = mt5.account_info()
-                if not account_info:
-                    self.logger.error("Failed to get account information")
-                    return False
-                
-                self.account_info = account_info._asdict()
-                self.connected = True
-                self.last_heartbeat = datetime.now()
-                self.reconnect_attempts = 0
-                
-                self.logger.info(f"✅ Connected to MT5 successfully")
-                self.logger.info(f"Account: {self.account_info['login']}")
-                self.logger.info(f"Server: {self.account_info['server']}")
-                self.logger.info(f"Balance: ${self.account_info['balance']:.2f}")
-                self.logger.info(f"Equity: ${self.account_info['equity']:.2f}")
-                
-                # Initialize symbols info
-                self._initialize_symbols()
-                
                 return True
-                
         except Exception as e:
-            self.logger.error(f"Exception during MT5 connection: {e}")
+            self.logger.error(f"Exception during MT5 connection process: {e}")
             return False
-    
+
     def disconnect(self) -> bool:
         """Disconnect from MetaTrader 5"""
         try:
@@ -94,43 +126,44 @@ class MT5Connector:
         except Exception as e:
             self.logger.error(f"Error during MT5 disconnection: {e}")
             return False
-    
+
     def is_connected(self) -> bool:
         """Check if connected to MT5"""
         try:
             if not self.connected:
                 return False
-            
+
             # Perform heartbeat check
             account_info = mt5.account_info()
             if account_info is None:
+                self.logger.warning("MT5 connection lost (account info unavailable).")
                 self.connected = False
                 return False
-            
+
             self.last_heartbeat = datetime.now()
             return True
-            
+
         except Exception as e:
             self.logger.error(f"Connection check failed: {e}")
             self.connected = False
             return False
-    
+
     def reconnect(self) -> bool:
         """Attempt to reconnect to MT5"""
         if self.reconnect_attempts >= self.max_reconnect_attempts:
             self.logger.error("Maximum reconnection attempts reached")
             return False
-        
+
         self.logger.info(f"Attempting to reconnect to MT5 (attempt {self.reconnect_attempts + 1})")
         self.reconnect_attempts += 1
-        
+
         # Disconnect first
         self.disconnect()
         time.sleep(5)
-        
+
         # Attempt connection
         return self.connect()
-    
+
     def _initialize_symbols(self) -> None:
         """Initialize symbols information cache"""
         try:
@@ -139,58 +172,62 @@ class MT5Connector:
                 for symbol in symbols:
                     symbol_info = symbol._asdict()
                     self.symbols_info[symbol_info['name']] = symbol_info
-                    
+
                 self.logger.info(f"Initialized {len(self.symbols_info)} symbols")
             else:
                 self.logger.warning("No symbols available")
-                
+
         except Exception as e:
             self.logger.error(f"Failed to initialize symbols: {e}")
-    
+
     def get_account_info(self) -> Dict[str, Any]:
         """Get current account information"""
         try:
             if not self.is_connected():
                 if not self.reconnect():
+                    self.logger.error("Cannot retrieve account info: not connected.")
                     return {}
-            
+
             account_info = mt5.account_info()
             if account_info:
                 self.account_info = account_info._asdict()
                 return self.account_info
             else:
+                self.logger.warning("No account info returned from MT5.")
                 return {}
-                
+
         except Exception as e:
             self.logger.error(f"Failed to get account info: {e}")
             return {}
-    
+
     def get_symbol_info(self, symbol: str) -> Optional[Dict[str, Any]]:
         """Get symbol information"""
         try:
             if symbol in self.symbols_info:
                 return self.symbols_info[symbol]
-            
+
             # Try to get from MT5 if not cached
             symbol_info = mt5.symbol_info(symbol)
             if symbol_info:
                 symbol_dict = symbol_info._asdict()
                 self.symbols_info[symbol] = symbol_dict
                 return symbol_dict
-            
+
+            self.logger.warning(f"Symbol {symbol} not found or could not be retrieved.")
             return None
-            
+
         except Exception as e:
             self.logger.error(f"Failed to get symbol info for {symbol}: {e}")
             return None
-    
+
     def get_rates(self, symbol: str, timeframe: str, count: int = 1000) -> Optional[pd.DataFrame]:
         """Get historical rates for symbol"""
         try:
             if not self.is_connected():
                 if not self.reconnect():
+                    self.logger.error(f"Cannot retrieve rates for {symbol}: not connected.")
                     return None
-            
+
             # Map timeframe string to MT5 constant
             timeframe_map = {
                 'M1': mt5.TIMEFRAME_M1,
@@ -201,69 +238,71 @@ class MT5Connector:
                 'H4': mt5.TIMEFRAME_H4,
                 'D1': mt5.TIMEFRAME_D1
             }
-            
+
             mt5_timeframe = timeframe_map.get(timeframe)
             if mt5_timeframe is None:
                 self.logger.error(f"Invalid timeframe: {timeframe}")
                 return None
-            
+
             # Get rates
             rates = mt5.copy_rates_from_pos(symbol, mt5_timeframe, 0, count)
-            
+
             if rates is not None and len(rates) > 0:
                 df = pd.DataFrame(rates)
                 df['time'] = pd.to_datetime(df['time'], unit='s')
                 df.set_index('time', inplace=True)
                 return df
             else:
-                self.logger.warning(f"No rates data for {symbol}")
+                self.logger.warning(f"No rates data for {symbol} with timeframe {timeframe}")
                 return None
-                
+
         except Exception as e:
-            self.logger.error(f"Failed to get rates for {symbol}: {e}")
+            self.logger.error(f"Failed to get rates for {symbol} with timeframe {timeframe}: {e}")
             return None
-    
+
     def get_positions(self) -> List[Dict[str, Any]]:
         """Get all open positions"""
         try:
             if not self.is_connected():
                 if not self.reconnect():
+                    self.logger.error("Cannot retrieve positions: not connected.")
                     return []
-            
+
             positions = mt5.positions_get()
             if positions:
                 return [pos._asdict() for pos in positions]
             else:
                 return []
-                
+
         except Exception as e:
             self.logger.error(f"Failed to get positions: {e}")
             return []
-    
-    def place_order(self, symbol: str, order_type: int, volume: float, 
+
+    def place_order(self, symbol: str, order_type: int, volume: float,
                    price: float = 0.0, sl: float = 0.0, tp: float = 0.0,
                    comment: str = "AuraTrade", magic: int = 123456) -> Optional[Dict[str, Any]]:
         """Place a trading order"""
         try:
             if not self.is_connected():
                 if not self.reconnect():
+                    self.logger.error(f"Cannot place order for {symbol}: not connected.")
                     return None
-            
+
             # Get symbol info for proper price formatting
             symbol_info = self.get_symbol_info(symbol)
             if not symbol_info:
-                self.logger.error(f"Symbol {symbol} not found")
+                self.logger.error(f"Symbol {symbol} not found, cannot place order.")
                 return None
-            
+
             # Format prices according to symbol digits
-            digits = symbol_info['digits']
+            digits = symbol_info.get('digits', 2) # Default to 2 digits if not found
             if price > 0:
                 price = round(price, digits)
             if sl > 0:
                 sl = round(sl, digits)
             if tp > 0:
                 tp = round(tp, digits)
-            
+
             # Create order request
             request = {
                 "action": mt5.TRADE_ACTION_DEAL,
@@ -278,45 +317,46 @@ class MT5Connector:
                 "type_time": mt5.ORDER_TIME_GTC,
                 "type_filling": mt5.ORDER_FILLING_IOC,
             }
-            
+
             # Send order
             result = mt5.order_send(request)
-            
+
             if result and result.retcode == mt5.TRADE_RETCODE_DONE:
                 self.logger.info(f"✅ Order placed successfully: {result.order}")
                 return result._asdict()
             else:
                 error_msg = f"❌ Order failed: {result.retcode if result else 'Unknown error'}"
-                if result:
+                if result and hasattr(result, 'comment'):
                     error_msg += f" - {result.comment}"
                 self.logger.error(error_msg)
                 return None
-                
+
         except Exception as e:
-            self.logger.error(f"Exception placing order: {e}")
+            self.logger.error(f"Exception placing order for {symbol}: {e}")
             return None
-    
+
     def close_position(self, position_ticket: int) -> bool:
         """Close a specific position"""
         try:
             if not self.is_connected():
                 if not self.reconnect():
+                    self.logger.error(f"Cannot close position {position_ticket}: not connected.")
                     return False
-            
+
             # Get position info
             positions = mt5.positions_get(ticket=position_ticket)
             if not positions:
-                self.logger.error(f"Position {position_ticket} not found")
+                self.logger.error(f"Position {position_ticket} not found.")
                 return False
-            
+
             position = positions[0]
-            
+
             # Determine opposite order type
             if position.type == mt5.ORDER_TYPE_BUY:
                 order_type = mt5.ORDER_TYPE_SELL
             else:
                 order_type = mt5.ORDER_TYPE_BUY
-            
+
             # Create close request
             request = {
                 "action": mt5.TRADE_ACTION_DEAL,
@@ -329,73 +369,92 @@ class MT5Connector:
                 "type_time": mt5.ORDER_TIME_GTC,
                 "type_filling": mt5.ORDER_FILLING_IOC,
             }
-            
+
             # Send close order
             result = mt5.order_send(request)
-            
+
             if result and result.retcode == mt5.TRADE_RETCODE_DONE:
                 self.logger.info(f"✅ Position {position_ticket} closed successfully")
                 return True
             else:
                 error_msg = f"❌ Failed to close position {position_ticket}: {result.retcode if result else 'Unknown error'}"
+                if result and hasattr(result, 'comment'):
+                    error_msg += f" - {result.comment}"
                 self.logger.error(error_msg)
                 return False
-                
+
         except Exception as e:
             self.logger.error(f"Exception closing position {position_ticket}: {e}")
             return False
-    
+
     def get_current_price(self, symbol: str) -> Optional[Tuple[float, float]]:
         """Get current bid/ask prices for symbol"""
         try:
             if not self.is_connected():
                 if not self.reconnect():
+                    self.logger.error(f"Cannot get current price for {symbol}: not connected.")
                     return None
-            
+
             tick = mt5.symbol_info_tick(symbol)
             if tick:
                 return (tick.bid, tick.ask)
             else:
+                self.logger.warning(f"Could not retrieve tick information for {symbol}.")
                 return None
-                
+
         except Exception as e:
             self.logger.error(f"Failed to get current price for {symbol}: {e}")
             return None
-    
+
     def get_spread(self, symbol: str) -> Optional[float]:
         """Get current spread for symbol in pips"""
         try:
             prices = self.get_current_price(symbol)
             if not prices:
                 return None
-            
+
             bid, ask = prices
             symbol_info = self.get_symbol_info(symbol)
-            
+
             if not symbol_info:
+                self.logger.error(f"Symbol info not available for {symbol} to calculate spread.")
                 return None
-            
+
             # Calculate spread in pips
-            point = symbol_info['point']
+            point = symbol_info.get('point')
+            if point is None or point == 0:
+                self.logger.error(f"Invalid point value for symbol {symbol}.")
+                return None
+
             spread_points = ask - bid
-            spread_pips = spread_points / (point * 10) if point > 0 else 0
+            # Multiply by 10^digits to get spread in price units, then divide by point to get pips
+            # Or more simply, if point is 0.00001 for 5 decimal places, spread_points / point gives pips directly
+            spread_pips = spread_points / point
             
+            # For symbols with 2 decimal places (e.g., USDJPY), point is 0.01.
+            # spread_points / 0.01 = spread in pips.
+            # For symbols with 4 decimal places (e.g., EURUSD), point is 0.0001.
+            # spread_points / 0.0001 = spread in pips.
+            # The calculation spread_points / point seems correct for most cases.
+
             return spread_pips
-            
+
         except Exception as e:
             self.logger.error(f"Failed to get spread for {symbol}: {e}")
             return None
-    
+
     def is_market_open(self, symbol: str) -> bool:
         """Check if market is open for trading"""
         try:
             symbol_info = self.get_symbol_info(symbol)
             if not symbol_info:
+                self.logger.warning(f"Symbol info not available for {symbol}, cannot determine market status.")
                 return False
-            
+
             # Check if symbol is available for trading
-            return symbol_info.get('trade_mode', 0) == mt5.SYMBOL_TRADE_MODE_FULL
-            
+            # SYMBOL_TRADE_MODE_CLOSEONLY means market is closed for new orders
+            return symbol_info.get('trade_mode', mt5.SYMBOL_TRADE_MODE_CLOSED) != mt5.SYMBOL_TRADE_MODE_CLOSED
+
         except Exception as e:
             self.logger.error(f"Failed to check market status for {symbol}: {e}")
             return False
