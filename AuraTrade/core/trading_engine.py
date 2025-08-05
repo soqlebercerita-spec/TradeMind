@@ -25,7 +25,8 @@ class TradingEngine:
     
     def __init__(self, mt5_connector: MT5Connector, order_manager: OrderManager,
                  risk_manager: RiskManager, position_sizing: PositionSizing,
-                 data_manager: DataManager, ml_engine, notifier: TelegramNotifier):
+                 data_manager: DataManager, ml_engine, notifier: TelegramNotifier,
+                 strategies: dict, technical_analysis):
         
         self.logger = Logger().get_logger()
         self.config = Config()
@@ -39,6 +40,8 @@ class TradingEngine:
         self.data_manager = data_manager
         self.ml_engine = ml_engine
         self.notifier = notifier
+        self.strategies = strategies
+        self.technical_analysis = technical_analysis
         
         # Control flags
         self.running = False
@@ -151,7 +154,7 @@ class TradingEngine:
         self.logger.info("🏁 High-performance trading loop ended")
     
     def _process_high_quality_signals(self):
-        """Process only high-quality signals for better win rate"""
+        """Process signals from multiple strategies"""
         try:
             # Only trade major pairs during optimal hours
             optimal_symbols = ['EURUSD', 'GBPUSD', 'USDJPY', 'XAUUSD']
@@ -165,15 +168,46 @@ class TradingEngine:
                 if not self._is_symbol_optimal_for_trading(symbol):
                     continue
                 
-                # Get multi-timeframe analysis
-                signal_confirmations = self._get_signal_confirmations(symbol)
+                # Get data with technical analysis
+                m15_data = self.data_manager.get_rates(symbol, 'M15', 100)
+                if m15_data is None or len(m15_data) < 50:
+                    continue
                 
-                # Require multiple confirmations for high win rate
-                if signal_confirmations >= self.min_signal_confirmation:
-                    self._execute_high_quality_trade(symbol, signal_confirmations)
+                # Add comprehensive technical analysis
+                m15_data = self.technical_analysis.calculate_all_indicators(m15_data)
+                
+                # Get current price
+                current_price = self.data_manager.get_current_price(symbol)
+                if not current_price:
+                    continue
+                
+                # Get market condition
+                market_condition = self.data_manager.analyze_market_condition(symbol)
+                
+                # Check all strategies for signals
+                best_signal = None
+                highest_confidence = 0
+                
+                for strategy_name, strategy in self.strategies.items():
+                    if not strategy.enabled:
+                        continue
+                    
+                    try:
+                        signal = strategy.analyze_signal(symbol, m15_data, current_price, market_condition)
+                        
+                        if signal and signal['confidence'] > highest_confidence:
+                            best_signal = signal
+                            highest_confidence = signal['confidence']
+                            
+                    except Exception as e:
+                        self.logger.error(f"Error in {strategy_name} strategy: {e}")
+                
+                # Execute best signal if confidence is high enough
+                if best_signal and highest_confidence >= 70:
+                    self._execute_strategy_trade(symbol, best_signal)
                     
         except Exception as e:
-            self.logger.error(f"❌ Error processing high-quality signals: {e}")
+            self.logger.error(f"❌ Error processing signals: {e}")
     
     def _get_signal_confirmations(self, symbol: str) -> int:
         """Get number of signal confirmations from different sources"""
@@ -304,64 +338,67 @@ class TradingEngine:
             self.logger.error(f"❌ Error checking market conditions: {e}")
             return False
     
-    def _execute_high_quality_trade(self, symbol: str, confirmations: int):
-        """Execute trade only with high-quality signals"""
+    def _execute_strategy_trade(self, symbol: str, signal: Dict[str, Any]):
+        """Execute trade based on strategy signal"""
         try:
-            # Conservative position sizing for high win rate
-            account_info = self.mt5_connector.get_account_info()
-            if not account_info:
-                return
+            # Get signal parameters
+            entry_price = signal['entry_price']
+            signal_direction = signal['signal']
+            risk_percent = signal.get('risk_percent', 1.0)
+            sl_pips = signal.get('stop_loss_pips', 2.0)
+            tp_pips = signal.get('take_profit_pips', 4.0)
+            strategy_name = signal.get('strategy', 'Unknown')
             
-            # Risk only 0.5% per trade for conservative approach
-            risk_amount = account_info['equity'] * 0.005  # 0.5%
+            # Calculate stop loss and take profit prices
+            pip_size = 0.0001 if 'JPY' not in symbol else 0.01
             
-            # Get current price
-            current_price = self.mt5_connector.get_current_price(symbol)
-            if not current_price:
-                return
+            if signal_direction == 'buy':
+                stop_loss = entry_price - (sl_pips * pip_size)
+                take_profit = entry_price + (tp_pips * pip_size)
+                order_type = 0  # Buy
+            else:
+                stop_loss = entry_price + (sl_pips * pip_size)
+                take_profit = entry_price - (tp_pips * pip_size)
+                order_type = 1  # Sell
             
-            bid, ask = current_price
+            # Calculate position size using risk management
+            volume = self.position_sizing.calculate_lot_size(
+                symbol, entry_price, stop_loss, risk_percent
+            )
             
-            # Determine trade direction based on confirmations
-            # Simplified - in practice, use your signal logic
-            entry_price = ask  # Buy example
-            stop_loss = entry_price - 0.001  # 10 pips stop loss
-            take_profit = entry_price + 0.002  # 20 pips take profit (2:1 R:R)
-            
-            # Calculate position size
-            pip_value = 0.0001  # For major pairs
-            stop_loss_pips = abs(entry_price - stop_loss) / pip_value
-            
-            if stop_loss_pips > 0:
-                volume = risk_amount / (stop_loss_pips * 10)  # Simplified calculation
-                volume = round(volume, 2)
+            if volume > 0 and self.risk_manager.can_open_position(symbol):
+                # Place order
+                result = self.mt5_connector.place_order(
+                    symbol=symbol,
+                    order_type=order_type,
+                    volume=volume,
+                    price=entry_price,
+                    sl=stop_loss,
+                    tp=take_profit,
+                    comment=f"AuraTrade-{strategy_name}"
+                )
                 
-                if volume > 0:
-                    # Place order
-                    result = self.mt5_connector.place_order(
-                        symbol=symbol,
-                        order_type=0,  # Buy order
-                        volume=volume,
-                        price=entry_price,
-                        sl=stop_loss,
-                        tp=take_profit,
-                        comment=f"AuraTrade-HQ-{confirmations}"
-                    )
+                if result:
+                    self.trades_today += 1
+                    self.last_trade_time = datetime.now()
                     
-                    if result:
-                        self.trades_today += 1
-                        self.last_trade_time = datetime.now()
+                    direction_text = "BUY" if signal_direction == 'buy' else "SELL"
+                    self.logger.info(f"✅ {strategy_name} trade executed: {symbol} {direction_text} - Confidence: {signal['confidence']:.1f}%")
+                    
+                    # Send notification
+                    if self.notifier:
+                        self.notifier.send_trade_alert(
+                            direction_text, symbol, volume, entry_price, 
+                            stop_loss, take_profit, strategy_name
+                        )
                         
-                        self.logger.info(f"✅ High-quality trade executed: {symbol} - {confirmations} confirmations")
-                        
-                        # Send notification
-                        if self.notifier:
-                            self.notifier.notify_trade_opened(
-                                symbol, "BUY", volume, entry_price, take_profit, stop_loss
-                            )
+                else:
+                    self.logger.warning(f"⚠️ Failed to place {strategy_name} order for {symbol}")
+            else:
+                self.logger.info(f"📊 {strategy_name} signal blocked by risk management: {symbol}")
             
         except Exception as e:
-            self.logger.error(f"❌ Error executing high-quality trade: {e}")
+            self.logger.error(f"❌ Error executing strategy trade: {e}")
     
     def _is_symbol_optimal_for_trading(self, symbol: str) -> bool:
         """Check if symbol conditions are optimal for trading"""

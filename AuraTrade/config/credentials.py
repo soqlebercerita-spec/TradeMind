@@ -1,70 +1,76 @@
 
 """
-Credentials and API keys for AuraTrade Bot
-Store all sensitive information here
+Credentials configuration for AuraTrade Bot
+Store all sensitive information and API keys here
 """
-
-import os
-from typing import Dict, Any
 
 class Credentials:
     """Centralized credentials management"""
     
     def __init__(self):
-        # MetaTrader 5 Connection
+        # MetaTrader 5 Credentials
         self.MT5 = {
-            'login': int(os.getenv('MT5_LOGIN', '12345678')),
-            'password': os.getenv('MT5_PASSWORD', 'your_password'),
-            'server': os.getenv('MT5_SERVER', 'YourBroker-Demo'),
-            'path': os.getenv('MT5_PATH', r'C:\Program Files\MetaTrader 5\terminal64.exe'),
+            'login': 12345678,  # Replace with your MT5 account number
+            'password': 'your_password',  # Replace with your MT5 password
+            'server': 'MetaQuotes-Demo',  # Replace with your broker's server
             'timeout': 60000,
-            'retry_attempts': 3,
-            'retry_delay': 5
+            'portable': False
         }
         
         # Telegram Bot Configuration
         self.TELEGRAM = {
-            'bot_token': os.getenv('TELEGRAM_BOT_TOKEN', ''),
-            'chat_id': os.getenv('TELEGRAM_CHAT_ID', ''),
-            'notifications_enabled': os.getenv('TELEGRAM_ENABLED', 'false').lower() == 'true'
+            'bot_token': 'your_telegram_bot_token',  # Get from @BotFather
+            'chat_id': 'your_chat_id',  # Your Telegram chat ID
+            'notifications_enabled': False  # Set to True when configured
         }
         
-        # News API Keys (for sentiment analysis)
-        self.NEWS_API = {
-            'newsapi_key': os.getenv('NEWSAPI_KEY', ''),
-            'alpha_vantage_key': os.getenv('ALPHAVANTAGE_KEY', ''),
-            'finnhub_key': os.getenv('FINNHUB_KEY', '')
-        }
-        
-        # Database Configuration (if needed)
+        # Database Configuration (Optional)
         self.DATABASE = {
-            'host': os.getenv('DB_HOST', 'localhost'),
-            'port': int(os.getenv('DB_PORT', '5432')),
-            'name': os.getenv('DB_NAME', 'auratrade'),
-            'user': os.getenv('DB_USER', 'postgres'),
-            'password': os.getenv('DB_PASSWORD', '')
+            'host': 'localhost',
+            'port': 5432,
+            'database': 'auratrade',
+            'username': 'postgres',
+            'password': 'your_db_password',
+            'enabled': False
         }
         
-        # Webhook URLs (for external integrations)
-        self.WEBHOOKS = {
-            'discord_webhook': os.getenv('DISCORD_WEBHOOK', ''),
-            'slack_webhook': os.getenv('SLACK_WEBHOOK', '')
+        # API Keys for external services
+        self.API_KEYS = {
+            'news_api': 'your_news_api_key',
+            'economic_calendar': 'your_calendar_api_key'
         }
     
-    def validate_credentials(self) -> Dict[str, bool]:
-        """Validate that required credentials are present"""
+    def validate_credentials(self) -> dict:
+        """Validate all credentials"""
         validation = {
             'mt5_configured': bool(self.MT5['login'] and self.MT5['password'] and self.MT5['server']),
-            'telegram_configured': bool(self.TELEGRAM['bot_token'] and self.TELEGRAM['chat_id']) if self.TELEGRAM['notifications_enabled'] else True,
-            'path_exists': os.path.exists(self.MT5['path']) if self.MT5['path'] else False
+            'telegram_configured': bool(self.TELEGRAM['bot_token'] and self.TELEGRAM['chat_id']),
+            'database_configured': self.DATABASE['enabled'] and bool(self.DATABASE['host']),
+            'apis_configured': bool(self.API_KEYS.get('news_api'))
         }
         
         return validation
     
-    def get_mt5_config(self) -> Dict[str, Any]:
-        """Get MT5 configuration"""
+    def is_telegram_configured(self) -> bool:
+        """Check if Telegram is properly configured"""
+        return (self.TELEGRAM['notifications_enabled'] and 
+                bool(self.TELEGRAM['bot_token']) and 
+                bool(self.TELEGRAM['chat_id']))
+    
+    def get_mt5_credentials(self) -> dict:
+        """Get MT5 credentials"""
         return self.MT5.copy()
     
-    def get_telegram_config(self) -> Dict[str, Any]:
+    def get_telegram_config(self) -> dict:
         """Get Telegram configuration"""
         return self.TELEGRAM.copy()
+    
+    @property
+    def TELEGRAM_BOT_TOKEN(self) -> str:
+        """Get Telegram bot token"""
+        return self.TELEGRAM.get('bot_token', '')
+    
+    @property
+    def TELEGRAM_CHAT_ID(self) -> str:
+        """Get Telegram chat ID"""
+        return self.TELEGRAM.get('chat_id', '')
