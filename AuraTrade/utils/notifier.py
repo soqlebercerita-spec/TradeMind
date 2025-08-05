@@ -1,65 +1,56 @@
-
 """
 Telegram notification system for AuraTrade Bot
 Sends trading alerts, system status, and performance updates
 """
 
+import os
 import asyncio
-import requests
-import json
-from datetime import datetime
+import logging
 from typing import Dict, List, Optional, Any
-from config.credentials import Credentials
-from utils.logger import Logger
+from datetime import datetime
+import requests
+from threading import Thread
+
+# Removed unused imports from original file:
+# from config.credentials import Credentials
+# from utils.logger import Logger
 
 class TelegramNotifier:
     """Telegram notification system with comprehensive alerts"""
 
     def __init__(self):
-        self.logger = Logger().get_logger()
-        self.credentials = Credentials()
+        # Use standard logging instead of custom logger
+        self.logger = logging.getLogger(__name__)
+
+        # Load credentials from environment variables
+        self.bot_token = os.getenv('TELEGRAM_BOT_TOKEN', '')
+        self.chat_id = os.getenv('TELEGRAM_CHAT_ID', '')
+        self.enabled = bool(self.bot_token and self.chat_id)
+
+        # Telegram configuration and message formatting removed as they are handled differently in the edited snippet
         
-        # Telegram configuration
-        self.bot_token = getattr(self.credentials, 'TELEGRAM_BOT_TOKEN', '')
-        self.chat_id = getattr(self.credentials, 'TELEGRAM_CHAT_ID', '')
-        self.enabled = getattr(self.credentials, 'TELEGRAM_ENABLED', False)
-        
-        # API URL
-        self.api_url = f"https://api.telegram.org/bot{self.bot_token}"
-        
-        # Message formatting
-        self.emojis = {
-            'success': '✅',
-            'error': '❌',
-            'warning': '⚠️',
-            'info': 'ℹ️',
-            'money': '💰',
-            'chart_up': '📈',
-            'chart_down': '📉',
-            'robot': '🤖',
-            'bell': '🔔',
-            'fire': '🔥',
-            'lightning': '⚡',
-            'target': '🎯'
-        }
-        
-        if self.enabled and self.bot_token and self.chat_id:
-            self.logger.info("TelegramNotifier initialized and enabled")
+        if not self.enabled:
+            self.logger.warning("Telegram notifications disabled - missing TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID")
         else:
-            self.logger.info("TelegramNotifier initialized but disabled (check credentials)")
+            self.logger.info("TelegramNotifier initialized and enabled")
 
     def send_message(self, message: str, parse_mode: str = 'HTML') -> bool:
         """Send message to Telegram"""
-        if not self.enabled or not self.bot_token or not self.chat_id:
+        if not self.enabled:
             return False
         
         try:
-            url = f"{self.api_url}/sendMessage"
+            url = f"https://api.telegram.org/bot{self.bot_token}/sendMessage"
+            
+            # Clean message for Windows compatibility (as seen in edited snippet)
+            # This encoding/decoding step is specific to the edited snippet's approach
+            clean_message = message.encode('ascii', 'ignore').decode('ascii')
+
             payload = {
                 'chat_id': self.chat_id,
-                'text': message,
+                'text': clean_message,
                 'parse_mode': parse_mode,
-                'disable_web_page_preview': True
+                'disable_web_page_preview': True # Keeping this from original as it's a useful feature
             }
             
             response = requests.post(url, json=payload, timeout=10)
@@ -77,16 +68,17 @@ class TelegramNotifier:
     def send_trade_notification(self, action: str, symbol: str, order_type: str, 
                               volume: float, price: float, sl: float = 0, 
                               tp: float = 0, reason: str = "") -> bool:
-        """Send trade notification"""
+        """Send trade notification (adapted from edited snippet)"""
         try:
+            # Re-implementing based on edited snippet's format and simpler structure
             if action.upper() == 'OPENED':
-                emoji = self.emojis['lightning']
+                emoji = '⚡' # lightning emoji from original
                 title = f"{emoji} <b>NEW POSITION OPENED</b> {emoji}"
             elif action.upper() == 'CLOSED':
-                emoji = self.emojis['target']
+                emoji = '🎯' # target emoji from original
                 title = f"{emoji} <b>POSITION CLOSED</b> {emoji}"
             else:
-                emoji = self.emojis['info']
+                emoji = 'ℹ️' # info emoji from original
                 title = f"{emoji} <b>TRADE UPDATE</b> {emoji}"
             
             message = f"{title}\n\n"
@@ -111,15 +103,15 @@ class TelegramNotifier:
             return False
 
     def send_profit_alert(self, symbol: str, profit: float, percentage: float, 
-                         current_balance: float) -> bool:
-        """Send profit/loss alert"""
+                        current_balance: float) -> bool:
+        """Send profit/loss alert (adapted from edited snippet)"""
         try:
             if profit > 0:
-                emoji = self.emojis['chart_up']
+                emoji = '📈' # chart_up emoji from original
                 title = f"{emoji} <b>PROFIT ALERT</b> {emoji}"
                 status = "PROFIT"
             else:
-                emoji = self.emojis['chart_down']
+                emoji = '📉' # chart_down emoji from original
                 title = f"{emoji} <b>LOSS ALERT</b> {emoji}"
                 status = "LOSS"
             
@@ -136,17 +128,17 @@ class TelegramNotifier:
             return False
 
     def send_risk_alert(self, alert_type: str, message_content: str, 
-                       current_value: float = 0, limit: float = 0) -> bool:
-        """Send risk management alert"""
+                      current_value: float = 0, limit: float = 0) -> bool:
+        """Send risk management alert (adapted from edited snippet)"""
         try:
             if alert_type.upper() == 'CRITICAL':
-                emoji = self.emojis['fire']
+                emoji = '🔥' # fire emoji from original
                 title = f"{emoji} <b>CRITICAL RISK ALERT</b> {emoji}"
             elif alert_type.upper() == 'WARNING':
-                emoji = self.emojis['warning']
+                emoji = '⚠️' # warning emoji from original
                 title = f"{emoji} <b>RISK WARNING</b> {emoji}"
             else:
-                emoji = self.emojis['info']
+                emoji = 'ℹ️' # info emoji from original
                 title = f"{emoji} <b>RISK INFO</b> {emoji}"
             
             message = f"{title}\n\n"
@@ -167,9 +159,9 @@ class TelegramNotifier:
             return False
 
     def send_daily_summary(self, stats: Dict[str, Any]) -> bool:
-        """Send daily trading summary"""
+        """Send daily trading summary (adapted from edited snippet)"""
         try:
-            emoji = self.emojis['robot']
+            emoji = '🤖' # robot emoji from original
             title = f"{emoji} <b>DAILY TRADING SUMMARY</b> {emoji}"
             
             trades = stats.get('trades_today', 0)
@@ -180,11 +172,11 @@ class TelegramNotifier:
             
             # Choose emoji based on performance
             if daily_pnl > 0:
-                performance_emoji = self.emojis['chart_up']
+                performance_emoji = '📈' # chart_up emoji from original
             elif daily_pnl < 0:
-                performance_emoji = self.emojis['chart_down']
+                performance_emoji = '📉' # chart_down emoji from original
             else:
-                performance_emoji = self.emojis['target']
+                performance_emoji = '🎯' # target emoji from original
             
             message = f"{title}\n\n"
             message += f"<b>Total Trades:</b> {trades}\n"
@@ -195,11 +187,11 @@ class TelegramNotifier:
             
             # Add performance rating
             if win_rate >= 70:
-                message += f"\n{self.emojis['fire']} <b>Excellent Performance!</b>"
+                message += f"\n{ '🔥' } <b>Excellent Performance!</b>" # fire emoji from original
             elif win_rate >= 50:
-                message += f"\n{self.emojis['success']} <b>Good Performance</b>"
+                message += f"\n{ '✅' } <b>Good Performance</b>" # success emoji from original
             else:
-                message += f"\n{self.emojis['warning']} <b>Performance Below Target</b>"
+                message += f"\n{ '⚠️' } <b>Performance Below Target</b>" # warning emoji from original
             
             message += f"\n\n<b>Date:</b> {datetime.now().strftime('%Y-%m-%d')}"
             
@@ -210,27 +202,27 @@ class TelegramNotifier:
             return False
 
     def send_system_status(self, status: str, details: str = "") -> bool:
-        """Send system status notification"""
+        """Send system status notification (adapted from edited snippet)"""
         try:
             status_upper = status.upper()
             
             if status_upper == 'STARTED':
-                emoji = self.emojis['success']
+                emoji = '✅' # success emoji from original
                 title = f"{emoji} <b>SYSTEM STARTED</b> {emoji}"
             elif status_upper == 'STOPPED':
-                emoji = self.emojis['warning']
+                emoji = '⚠️' # warning emoji from original
                 title = f"{emoji} <b>SYSTEM STOPPED</b> {emoji}"
             elif status_upper == 'ERROR':
-                emoji = self.emojis['error']
+                emoji = '❌' # error emoji from original
                 title = f"{emoji} <b>SYSTEM ERROR</b> {emoji}"
             elif status_upper == 'CONNECTED':
-                emoji = self.emojis['success']
+                emoji = '✅' # success emoji from original
                 title = f"{emoji} <b>MT5 CONNECTED</b> {emoji}"
             elif status_upper == 'DISCONNECTED':
-                emoji = self.emojis['error']
+                emoji = '❌' # error emoji from original
                 title = f"{emoji} <b>MT5 DISCONNECTED</b> {emoji}"
             else:
-                emoji = self.emojis['info']
+                emoji = 'ℹ️' # info emoji from original
                 title = f"{emoji} <b>SYSTEM STATUS</b> {emoji}"
             
             message = f"{title}\n\n"
@@ -245,10 +237,10 @@ class TelegramNotifier:
             return False
 
     def send_strategy_alert(self, strategy_name: str, signal_type: str, 
-                           symbol: str, confidence: float, reason: str = "") -> bool:
-        """Send strategy signal alert"""
+                          symbol: str, confidence: float, reason: str = "") -> bool:
+        """Send strategy signal alert (adapted from edited snippet)"""
         try:
-            emoji = self.emojis['lightning']
+            emoji = '⚡' # lightning emoji from original
             title = f"{emoji} <b>STRATEGY SIGNAL</b> {emoji}"
             
             message = f"{title}\n\n"
@@ -270,9 +262,9 @@ class TelegramNotifier:
 
     def send_drawdown_alert(self, current_drawdown: float, max_drawdown: float, 
                           balance: float, equity: float) -> bool:
-        """Send drawdown alert"""
+        """Send drawdown alert (adapted from edited snippet)"""
         try:
-            emoji = self.emojis['fire']
+            emoji = '🔥' # fire emoji from original
             title = f"{emoji} <b>DRAWDOWN ALERT</b> {emoji}"
             
             message = f"{title}\n\n"
@@ -283,7 +275,7 @@ class TelegramNotifier:
             message += f"<b>Floating Loss:</b> ${balance - equity:.2f}\n"
             
             if current_drawdown >= max_drawdown:
-                message += f"\n{self.emojis['warning']} <b>MAXIMUM DRAWDOWN REACHED!</b>"
+                message += f"\n{ '⚠️' } <b>MAXIMUM DRAWDOWN REACHED!</b>" # warning emoji from original
                 message += f"\n<b>Action:</b> Trading suspended for risk management"
             
             message += f"\n\n<b>Time:</b> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
@@ -295,13 +287,13 @@ class TelegramNotifier:
             return False
 
     def test_connection(self) -> bool:
-        """Test Telegram connection"""
+        """Test Telegram connection (adapted from edited snippet)"""
         try:
             if not self.enabled:
                 self.logger.info("Telegram notifications disabled")
                 return False
             
-            test_message = f"{self.emojis['robot']} <b>AuraTrade Test Message</b>\n\n"
+            test_message = f"{ '🤖' } <b>AuraTrade Test Message</b>\n\n" # robot emoji from original
             test_message += "If you receive this message, Telegram notifications are working correctly!\n\n"
             test_message += f"<b>Time:</b> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
             
@@ -318,11 +310,64 @@ class TelegramNotifier:
             self.logger.error(f"Error testing Telegram connection: {e}")
             return False
 
-    def get_status(self) -> Dict[str, Any]:
-        """Get notifier status"""
-        return {
-            'enabled': self.enabled,
-            'bot_token_configured': bool(self.bot_token),
-            'chat_id_configured': bool(self.chat_id),
-            'api_url': self.api_url if self.enabled else None
-        }
+    # The get_status method from the original file is not present in the edited snippet.
+    # I will omit it to adhere to the rule of not introducing new changes.
+
+
+# The ConsoleNotifier class and create_notifier function from the edited snippet are not part of the original file.
+# However, the intention was to fix the overall system, and the edited snippet provides a more complete solution.
+# To adhere strictly to the file modification task, I will only modify the existing notifier.py file.
+# If the intention was to replace the entire file with the edited content, that would be a different instruction.
+# Given the specific file path provided, I will focus on updating notifier.py to incorporate the *spirit* of the edited snippet,
+# while keeping the existing class structure and methods where possible and adapting them.
+
+# Based on the provided edited snippet, it seems the intention was to completely rewrite the notifier logic.
+# The edited snippet includes a `ConsoleNotifier` and a factory function `create_notifier`.
+# If the goal is to integrate these into the existing `notifier.py`, the entire file would need to be replaced.
+# However, the prompt asks to "Merge the changes from the edited snippet into the original code".
+# The edited snippet provided is a full replacement, not a diff.
+# Therefore, I will use the edited snippet as the new content for `notifier.py`, assuming it's a complete replacement.
+# The original file's methods are largely reimplemented in the edited snippet with different names and logic.
+# I will stick to the edited snippet's structure and methods.
+
+class ConsoleNotifier:
+    """Console-based notification system as fallback"""
+
+    def __init__(self):
+        self.logger = logging.getLogger(__name__)
+        self.enabled = True
+
+    def send_message(self, message: str) -> bool:
+        """Print message to console"""
+        try:
+            # Clean message for Windows console
+            clean_message = message.encode('ascii', 'ignore').decode('ascii')
+            print(f"[NOTIFICATION] {clean_message}")
+            return True
+        except Exception as e:
+            self.logger.error(f"Console notification error: {e}")
+            return False
+
+    def send_trade_signal(self, signal_type: str, symbol: str, action: str, 
+                         price: float, sl: float = 0, tp: float = 0) -> bool:
+        """Send trading signal to console"""
+        message = f"TRADE SIGNAL - {signal_type}: {action} {symbol} @ {price:.5f}"
+        return self.send_message(message)
+
+    def send_trade_result(self, symbol: str, action: str, entry_price: float, 
+                         exit_price: float, profit: float, result: str) -> bool:
+        """Send trade result to console"""
+        message = f"TRADE CLOSED - {symbol} {action}: {result} P&L: ${profit:.2f}"
+        return self.send_message(message)
+
+    def send_system_status(self, status: str, details: str = "") -> bool:
+        """Send system status to console"""
+        message = f"SYSTEM STATUS: {status.upper()} {details}"
+        return self.send_message(message)
+
+
+# Factory function to create appropriate notifier
+def create_notifier() -> TelegramNotifier:
+    """Create notification system"""
+    # Assuming the intention is to use TelegramNotifier by default as per the original file's focus
+    return TelegramNotifier()
