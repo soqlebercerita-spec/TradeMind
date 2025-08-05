@@ -6,8 +6,11 @@ Optimized for 85%+ win rate with conservative risk management
 
 import sys
 import os
-import signal
+import time
 import threading
+from datetime import datetime
+from typing import Dict, List
+import MetaTrader5 as mt5
 from PyQt5.QtWidgets import QApplication
 
 # Add project root to Python path
@@ -24,6 +27,7 @@ from core.position_sizing import PositionSizing
 from data.data_manager import DataManager
 from gui.main_window import MainWindow
 from utils.logger import Logger
+from utils.notifier import TelegramNotifier as Notifier # Alias TelegramNotifier to Notifier for brevity
 from utils.notifier import TelegramNotifier
 
 class MLEngine:
@@ -56,6 +60,22 @@ class AuraTradeBot:
         self.notifier = None
 
         self.logger.info("🤖 AuraTrade Bot initialized")
+
+        # Initialize notification system
+        self.notifier = Notifier()
+        self.logger.info("📱 Notification system initialized")
+
+        # Send startup notification
+        if self.notifier.enabled:
+            self.notifier.send_message(
+                "🚀 <b>AuraTrade Bot Started</b>\n\n"
+                "✅ System: Online\n"
+                "📱 Notifications: Active\n"
+                "💹 Ready for trading signals\n"
+                f"⏰ Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+            )
+            self.logger.info("✅ Startup notification sent to Telegram")
+
 
     def initialize_components(self):
         """Initialize all system components"""

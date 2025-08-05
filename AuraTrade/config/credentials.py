@@ -19,9 +19,9 @@ class Credentials:
         
         # Telegram Bot Configuration
         self.TELEGRAM = {
-            'bot_token': 'your_telegram_bot_token',  # Get from @BotFather
-            'chat_id': 'your_chat_id',  # Your Telegram chat ID
-            'notifications_enabled': False  # Set to True when configured
+            'bot_token': '8365734234:AAH2uTaZPDD47Lnm3y_Tcr6aj3xGL-bVsgk',  # Get from @BotFather
+            'chat_id': '5061106648',  # Your Telegram chat ID
+            'notifications_enabled': True  # Set to True when configured
         }
         
         # Database Configuration (Optional)
@@ -68,9 +68,9 @@ class Credentials:
     @property
     def TELEGRAM_BOT_TOKEN(self) -> str:
         """Get Telegram bot token"""
-        return self.TELEGRAM.get('bot_token', '')
+        return '8365734234:AAH2uTaZPDD47Lnm3y_Tcr6aj3xGL-bVsgk'
     
     @property
     def TELEGRAM_CHAT_ID(self) -> str:
         """Get Telegram chat ID"""
-        return self.TELEGRAM.get('chat_id', '')
+        return '5061106648'
