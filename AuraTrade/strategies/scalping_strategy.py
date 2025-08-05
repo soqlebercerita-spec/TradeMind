@@ -1,12 +1,11 @@
 
 """
-Scalping Strategy for AuraTrade Bot
-Quick entries and exits with small profit targets
+Scalping strategy for AuraTrade Bot
 """
 
 import pandas as pd
 import numpy as np
-from typing import Dict, List, Optional, Any
+from typing import Dict, Any, Optional
 from datetime import datetime
 from utils.logger import Logger
 
@@ -15,87 +14,79 @@ class ScalpingStrategy:
     
     def __init__(self):
         self.logger = Logger().get_logger()
-        self.name = "Scalping_Strategy"
         self.enabled = True
+        self.name = "Scalping"
         
-        # Scalping parameters
-        self.profit_target_pips = 3.0
-        self.stop_loss_pips = 2.0
-        self.rsi_oversold = 25
-        self.rsi_overbought = 75
-        self.min_atr = 0.5
-        self.max_atr = 3.0
+        # Strategy parameters
+        self.min_confidence = 70.0
+        self.scalp_target = 8.0  # pips
+        self.stop_loss = 5.0  # pips
+        self.bb_period = 20
+        self.bb_std = 2.0
         
-    def analyze_signal(self, symbol: str, data: pd.DataFrame, 
-                      current_price: tuple, market_condition: Dict) -> Optional[Dict[str, Any]]:
+    def analyze_signal(self, symbol: str, data: pd.DataFrame, current_price: tuple, 
+                      market_condition: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Analyze scalping signals"""
         try:
-            if not self.enabled or len(data) < 50:
+            if len(data) < 25:
                 return None
+            
+            # Calculate Bollinger Bands
+            bb_middle = data['close'].rolling(self.bb_period).mean()
+            bb_std = data['close'].rolling(self.bb_period).std()
+            bb_upper = bb_middle + (bb_std * self.bb_std)
+            bb_lower = bb_middle - (bb_std * self.bb_std)
+            
+            # Calculate RSI
+            rsi = self._calculate_rsi(data['close'], 14)
+            
+            # Calculate MACD
+            macd_data = self._calculate_macd(data['close'])
             
             bid, ask = current_price
-            latest = data.iloc[-1]
-            
-            # ATR filter
-            atr = latest.get('atr', 0)
-            if not (self.min_atr <= atr * 10000 <= self.max_atr):
-                return None
-            
-            # RSI analysis
-            rsi = latest.get('rsi', 50)
-            
-            # Moving average analysis
-            sma_20 = latest.get('sma_20', latest['close'])
-            ema_12 = latest.get('ema_12', latest['close'])
-            
-            # MACD analysis
-            macd = latest.get('macd', 0)
-            macd_signal = latest.get('macd_signal', 0)
-            
-            # Bollinger Bands
-            bb_upper = latest.get('bb_upper', latest['close'] + 0.001)
-            bb_lower = latest.get('bb_lower', latest['close'] - 0.001)
+            current = (bid + ask) / 2
             
             signal = None
-            confidence = 0.0
+            confidence = 0
             
-            # Bullish scalping signal
-            if (rsi < self.rsi_oversold and 
-                latest['close'] < bb_lower and 
-                macd > macd_signal and
-                latest['close'] > ema_12):
+            # Oversold bounce signal
+            if (current <= bb_lower.iloc[-1] and 
+                rsi.iloc[-1] < 30 and
+                macd_data['histogram'].iloc[-1] > macd_data['histogram'].iloc[-2]):
                 
                 signal = 'buy'
-                confidence = 70 + min((self.rsi_oversold - rsi), 15)
-            
-            # Bearish scalping signal
-            elif (rsi > self.rsi_overbought and 
-                  latest['close'] > bb_upper and 
-                  macd < macd_signal and
-                  latest['close'] < ema_12):
+                confidence = 75.0
+                
+                # Additional confirmations
+                if data['close'].iloc[-1] > data['low'].iloc[-1]:  # Not at session low
+                    confidence += 10
+                if market_condition.get('condition') == 'ranging':
+                    confidence += 5
+                    
+            # Overbought fade signal
+            elif (current >= bb_upper.iloc[-1] and 
+                  rsi.iloc[-1] > 70 and
+                  macd_data['histogram'].iloc[-1] < macd_data['histogram'].iloc[-2]):
                 
                 signal = 'sell'
-                confidence = 70 + min((rsi - self.rsi_overbought), 15)
+                confidence = 75.0
+                
+                # Additional confirmations
+                if data['close'].iloc[-1] < data['high'].iloc[-1]:  # Not at session high
+                    confidence += 10
+                if market_condition.get('condition') == 'ranging':
+                    confidence += 5
             
-            # Mean reversion scalping
-            elif latest['close'] < sma_20 * 0.998 and rsi < 40:
-                signal = 'buy'
-                confidence = 65
-            elif latest['close'] > sma_20 * 1.002 and rsi > 60:
-                signal = 'sell'
-                confidence = 65
-            
-            if signal and confidence > 65:
+            if signal and confidence >= self.min_confidence:
                 return {
-                    'strategy': self.name,
                     'signal': signal,
                     'confidence': confidence,
-                    'entry_price': ask if signal == 'buy' else bid,
-                    'stop_loss_pips': self.stop_loss_pips,
-                    'take_profit_pips': self.profit_target_pips,
-                    'risk_percent': 1.0,
-                    'timeframe': 'M5',
-                    'reason': f'Scalping {signal.upper()} - RSI: {rsi:.1f}, BB position, MACD cross'
+                    'entry_price': current,
+                    'stop_loss_pips': self.stop_loss,
+                    'take_profit_pips': self.scalp_target,
+                    'risk_percent': 0.8,
+                    'strategy': self.name,
+                    'timeframe': 'M5'
                 }
             
             return None
@@ -104,109 +95,36 @@ class ScalpingStrategy:
             self.logger.error(f"Error in scalping strategy analysis: {e}")
             return None
     
-    def should_close_position(self, position: Dict, current_data: pd.DataFrame) -> bool:
-        """Check if scalping position should be closed"""
+    def _calculate_rsi(self, series: pd.Series, period: int = 14) -> pd.Series:
+        """Calculate RSI"""
         try:
-            # Quick profit taking
-            profit_usd = position.get('profit', 0)
-            if profit_usd > 10:  # $10 profit
-                return True
+            delta = series.diff()
+            gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
+            loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
             
-            # RSI reversal exit
-            if len(current_data) > 0:
-                latest_rsi = current_data.iloc[-1].get('rsi', 50)
-                
-                # Close long positions on high RSI
-                if position.get('type') == 0 and latest_rsi > 75:  # Long position
-                    return True
-                
-                # Close short positions on low RSI
-                if position.get('type') == 1 and latest_rsi < 25:  # Short position
-                    return True
+            rs = gain / loss
+            rsi = 100 - (100 / (1 + rs))
             
-            return False
+            return rsi
             
-        except Exception as e:
-            self.logger.error(f"Error checking scalping position close: {e}")
-            return False
+        except Exception:
+            return pd.Series()
     
-    def get_strategy_info(self) -> Dict[str, Any]:
-        """Get strategy information"""
-        return {
-            'name': self.name,
-            'enabled': self.enabled,
-            'type': 'Scalping',
-            'timeframe': 'M5',
-            'parameters': {
-                'profit_target_pips': self.profit_target_pips,
-                'stop_loss_pips': self.stop_loss_pips,
-                'rsi_oversold': self.rsi_oversold,
-                'rsi_overbought': self.rsi_overbought
+    def _calculate_macd(self, series: pd.Series, fast: int = 12, slow: int = 26, signal: int = 9) -> Dict[str, pd.Series]:
+        """Calculate MACD"""
+        try:
+            exp1 = series.ewm(span=fast).mean()
+            exp2 = series.ewm(span=slow).mean()
+            
+            macd_line = exp1 - exp2
+            signal_line = macd_line.ewm(span=signal).mean()
+            histogram = macd_line - signal_line
+            
+            return {
+                'macd': macd_line,
+                'signal': signal_line,
+                'histogram': histogram
             }
-        }
-"""
-Scalping Strategy for AuraTrade
-Quick profit scalping with high accuracy
-"""
-
-import pandas as pd
-from typing import Dict, Any, Optional
-from datetime import datetime
-
-class ScalpingStrategy:
-    """Scalping Strategy for quick profits"""
-    
-    def __init__(self):
-        self.enabled = True
-        self.name = "Scalping"
-        self.min_confidence = 70
-        
-    def analyze_signal(self, symbol: str, data: pd.DataFrame, 
-                      current_price: tuple, market_condition: Dict) -> Optional[Dict[str, Any]]:
-        """Analyze scalping signals"""
-        try:
-            if len(data) < 50:
-                return None
-                
-            latest = data.iloc[-1]
-            bid, ask = current_price
             
-            # EMA crossover
-            ema_12 = latest.get('ema_12', 0)
-            ema_26 = latest.get('ema_26', 0)
-            
-            # Bollinger Bands
-            bb_upper = latest.get('bb_upper', 0)
-            bb_lower = latest.get('bb_lower', 0)
-            bb_middle = latest.get('bb_middle', 0)
-            
-            signal = None
-            confidence = 0
-            
-            # Buy at lower band with EMA support
-            if (latest['close'] <= bb_lower and ema_12 > ema_26 and 
-                market_condition.get('trend') != 'bearish'):
-                signal = 'buy'
-                confidence = 75
-                
-            # Sell at upper band with EMA resistance
-            elif (latest['close'] >= bb_upper and ema_12 < ema_26 and 
-                  market_condition.get('trend') != 'bullish'):
-                signal = 'sell'
-                confidence = 75
-                
-            if signal and confidence >= self.min_confidence:
-                return {
-                    'signal': signal,
-                    'entry_price': ask if signal == 'buy' else bid,
-                    'confidence': confidence,
-                    'strategy': self.name,
-                    'stop_loss_pips': 2.0,
-                    'take_profit_pips': 4.0,
-                    'risk_percent': 1.0
-                }
-                
-            return None
-            
-        except Exception as e:
-            return None
+        except Exception:
+            return {'macd': pd.Series(), 'signal': pd.Series(), 'histogram': pd.Series()}

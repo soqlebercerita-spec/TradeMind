@@ -1,91 +1,62 @@
-
 """
-Credentials configuration for AuraTrade Bot
-Store all sensitive information and API keys here
+Secure credentials management for AuraTrade Bot
 """
 
 class Credentials:
     """Secure credentials management"""
-    
+
     def __init__(self):
-        # MetaTrader 5 Configuration (Auto-detect from installed MT5)
+        # MetaTrader 5 Configuration
         self.MT5 = {
-            'login': None,  # Will auto-detect
-            'password': None,  # Will auto-detect
-            'server': None,  # Will auto-detect
-            'path': None,  # Will auto-detect
+            'login': 12345678,  # Replace with your MT5 login
+            'password': 'your_password',  # Replace with your MT5 password
+            'server': 'YourBroker-Demo',  # Replace with your broker server
+            'path': None,  # Auto-detect MT5 path
             'timeout': 10000,
             'portable': False
         }
-        
+
         # Telegram Bot Configuration
         self.TELEGRAM = {
-            'bot_token': '8365734234:AAH2uTaZPDD47Lnm3y_Tcr6aj3xGL-bVsgk',  # Get from @BotFather
-            'chat_id': '5061106648',  # Your Telegram chat ID
-            'notifications_enabled': True  # Set to True when configured
+            'bot_token': '',  # Get from @BotFather
+            'chat_id': '',  # Your Telegram chat ID
+            'notifications_enabled': False  # Set to True when configured
         }
-        
+
         # Database Configuration (Optional)
         self.DATABASE = {
-            'type': 'sqlite',  # sqlite, mysql, postgresql
+            'type': 'sqlite',
             'host': 'localhost',
             'port': 5432,
             'name': 'auratrade.db',
             'user': '',
             'password': ''
         }
-        
+
         # API Keys (Optional)
         self.API_KEYS = {
-            'financial_data': '',  # Alpha Vantage, Yahoo Finance, etc.
-            'news_api': '',  # News sentiment analysis
-            'economic_calendar': ''  # Economic events
+            'financial_data': '',
+            'news_api': '',
+            'economic_calendar': ''
         }
-    
-    @property
-    def MT5_LOGIN(self) -> int:
-        """Get MT5 login (auto-detected)"""
-        return self.MT5.get('login')
-    
-    @property
-    def MT5_PASSWORD(self) -> str:
-        """Get MT5 password (auto-detected)"""
-        return self.MT5.get('password')
-    
-    @property
-    def MT5_SERVER(self) -> str:
-        """Get MT5 server (auto-detected)"""
-        return self.MT5.get('server')
-    
-    @property
-    def TELEGRAM_BOT_TOKEN(self) -> str:
-        """Get Telegram bot token"""
-        return '8365734234:AAH2uTaZPDD47Lnm3y_Tcr6aj3xGL-bVsgk'
-    
-    @property
-    def TELEGRAM_CHAT_ID(self) -> str:
-        """Get Telegram chat ID"""
-        return '5061106648'
-    
-    @property
-    def TELEGRAM_ENABLED(self) -> bool:
-        """Check if Telegram notifications are enabled"""
-        return self.TELEGRAM.get('notifications_enabled', False)
-    
-    def validate_credentials(self) -> dict:
-        """Validate all credentials"""
+
+    def validate_credentials(self):
+        """Validate credential configuration"""
         validation = {
-            'telegram_configured': False,
-            'mt5_configured': True,  # Auto-detect mode
-            'api_keys_configured': True
+            'mt5_configured': bool(self.MT5.get('login') and self.MT5.get('password') and self.MT5.get('server')),
+            'telegram_configured': bool(self.TELEGRAM.get('bot_token') and self.TELEGRAM.get('chat_id')),
+            'database_configured': bool(self.DATABASE.get('name'))
         }
-        
-        # Validate Telegram
-        if self.TELEGRAM_BOT_TOKEN and self.TELEGRAM_CHAT_ID:
-            validation['telegram_configured'] = True
-        
         return validation
-    
-    def is_telegram_configured(self) -> bool:
-        """Check if Telegram is properly configured"""
-        return bool(self.TELEGRAM_BOT_TOKEN and self.TELEGRAM_CHAT_ID and self.TELEGRAM_ENABLED)
+
+    @property
+    def MT5_LOGIN(self):
+        return self.MT5.get('login')
+
+    @property
+    def MT5_PASSWORD(self):
+        return self.MT5.get('password')
+
+    @property
+    def MT5_SERVER(self):
+        return self.MT5.get('server')

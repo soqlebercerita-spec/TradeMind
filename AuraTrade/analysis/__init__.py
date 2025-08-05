@@ -1,8 +1,5 @@
 
 """
-Analysis modules package for AuraTrade Bot
-"""
-"""
-Analysis module for AuraTrade Bot
+Analysis modules for AuraTrade Bot
 Technical analysis and pattern recognition
 """

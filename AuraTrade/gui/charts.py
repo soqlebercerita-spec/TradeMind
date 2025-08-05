@@ -1,760 +1,176 @@
-
 """
-Live chart integration for AuraTrade Bot GUI
+Trading charts widget for AuraTrade Bot GUI
 """
 
-import sys
-import numpy as np
+from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QComboBox, 
+                           QLabel, QPushButton)
+from PyQt5.QtCore import QTimer
+import matplotlib.pyplot as plt
+from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+from matplotlib.figure import Figure
 import pandas as pd
-from PyQt5.QtWidgets import *
-from PyQt5.QtCore import *
-from PyQt5.QtGui import *
-import pyqtgraph as pg
-from typing import Dict, List, Optional, Any
-from datetime import datetime, timedelta
-
-class ChartWidget(QWidget):
-    """Advanced chart widget with technical indicators"""
-    
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.symbol = "EURUSD"
-        self.timeframe = "M15"
-        self.data = pd.DataFrame()
-        self.indicators = {}
-        
-        self.setup_ui()
-        self.setup_chart()
-        
-    def setup_ui(self):
-        """Setup chart UI"""
-        layout = QVBoxLayout(self)
-        
-        # Chart controls
-        controls = QHBoxLayout()
-        
-        # Symbol selector
-        self.symbol_combo = QComboBox()
-        self.symbol_combo.addItems(['EURUSD', 'GBPUSD', 'XAUUSD', 'BTCUSD', 'USDJPY'])
-        self.symbol_combo.currentTextChanged.connect(self.on_symbol_changed)
-        controls.addWidget(QLabel("Symbol:"))
-        controls.addWidget(self.symbol_combo)
-        
-        # Timeframe selector
-        self.timeframe_combo = QComboBox()
-        self.timeframe_combo.addItems(['M1', 'M5', 'M15', 'M30', 'H1', 'H4', 'D1'])
-        self.timeframe_combo.setCurrentText('M15')
-        self.timeframe_combo.currentTextChanged.connect(self.on_timeframe_changed)
-        controls.addWidget(QLabel("Timeframe:"))
-        controls.addWidget(self.timeframe_combo)
-        
-        # Indicator checkboxes
-        self.sma_check = QCheckBox("SMA")
-        self.sma_check.toggled.connect(self.update_indicators)
-        controls.addWidget(self.sma_check)
-        
-        self.ema_check = QCheckBox("EMA")
-        self.ema_check.toggled.connect(self.update_indicators)
-        controls.addWidget(self.ema_check)
-        
-        self.bollinger_check = QCheckBox("Bollinger")
-        self.bollinger_check.toggled.connect(self.update_indicators)
-        controls.addWidget(self.bollinger_check)
-        
-        controls.addStretch()
-        layout.addLayout(controls)
-        
-        # Chart area
-        self.chart_widget = pg.GraphicsLayoutWidget()
-        layout.addWidget(self.chart_widget)
-        
-    def setup_chart(self):
-        """Setup the main chart"""
-        # Main price plot
-        self.price_plot = self.chart_widget.addPlot(title="Price Chart")
-        self.price_plot.setLabel('left', 'Price')
-        self.price_plot.setLabel('bottom', 'Time')
-        self.price_plot.showGrid(x=True, y=True)
-        
-        # Candlestick items
-        self.candlestick_item = CandlestickItem()
-        self.price_plot.addItem(self.candlestick_item)
-        
-        # Indicator lines
-        self.sma_line = self.price_plot.plot(pen=pg.mkPen('blue', width=2), name="SMA")
-        self.ema_line = self.price_plot.plot(pen=pg.mkPen('red', width=2), name="EMA")
-        self.bb_upper = self.price_plot.plot(pen=pg.mkPen('gray', width=1), name="BB Upper")
-        self.bb_lower = self.price_plot.plot(pen=pg.mkPen('gray', width=1), name="BB Lower")
-        
-        # Volume plot
-        self.chart_widget.nextRow()
-        self.volume_plot = self.chart_widget.addPlot(title="Volume")
-        self.volume_plot.setLabel('left', 'Volume')
-        self.volume_bars = pg.BarGraphItem(x=[], height=[], width=0.8, brush='lightblue')
-        self.volume_plot.addItem(self.volume_bars)
-        
-        # RSI plot
-        self.chart_widget.nextRow()
-        self.rsi_plot = self.chart_widget.addPlot(title="RSI")
-        self.rsi_plot.setLabel('left', 'RSI')
-        self.rsi_plot.setYRange(0, 100)
-        self.rsi_line = self.rsi_plot.plot(pen=pg.mkPen('purple', width=2))
-        
-        # RSI levels
-        self.rsi_plot.addLine(y=70, pen=pg.mkPen('red', style=Qt.DashLine))
-        self.rsi_plot.addLine(y=30, pen=pg.mkPen('green', style=Qt.DashLine))
-        
-    def update_data(self, data: pd.DataFrame):
-        """Update chart with new data"""
-        if data.empty:
-            return
-            
-        self.data = data.copy()
-        self.update_candlesticks()
-        self.update_volume()
-        self.update_indicators()
-        
-    def update_candlesticks(self):
-        """Update candlestick chart"""
-        if self.data.empty:
-            return
-            
-        # Prepare candlestick data
-        times = np.arange(len(self.data))
-        opens = self.data['open'].values
-        highs = self.data['high'].values
-        lows = self.data['low'].values
-        closes = self.data['close'].values
-        
-        self.candlestick_item.setData(times, opens, highs, lows, closes)
-        
-    def update_volume(self):
-        """Update volume bars"""
-        if self.data.empty or 'volume' not in self.data.columns:
-            return
-            
-        times = np.arange(len(self.data))
-        volumes = self.data['volume'].values
-        
-        self.volume_bars.setOpts(x=times, height=volumes)
-        
-    def update_indicators(self):
-        """Update technical indicators"""
-        if self.data.empty:
-            return
-            
-        times = np.arange(len(self.data))
-        
-        # SMA
-        if self.sma_check.isChecked():
-            sma = self.calculate_sma(self.data['close'], 20)
-            self.sma_line.setData(times, sma)
-            self.sma_line.show()
-        else:
-            self.sma_line.hide()
-            
-        # EMA
-        if self.ema_check.isChecked():
-            ema = self.calculate_ema(self.data['close'], 20)
-            self.ema_line.setData(times, ema)
-            self.ema_line.show()
-        else:
-            self.ema_line.hide()
-            
-        # Bollinger Bands
-        if self.bollinger_check.isChecked():
-            bb_upper, bb_lower = self.calculate_bollinger_bands(self.data['close'])
-            self.bb_upper.setData(times, bb_upper)
-            self.bb_lower.setData(times, bb_lower)
-            self.bb_upper.show()
-            self.bb_lower.show()
-        else:
-            self.bb_upper.hide()
-            self.bb_lower.hide()
-            
-        # RSI
-        rsi = self.calculate_rsi(self.data['close'])
-        self.rsi_line.setData(times, rsi)
-        
-    def calculate_sma(self, prices: pd.Series, period: int) -> np.ndarray:
-        """Calculate Simple Moving Average"""
-        return prices.rolling(window=period).mean().fillna(0).values
-        
-    def calculate_ema(self, prices: pd.Series, period: int) -> np.ndarray:
-        """Calculate Exponential Moving Average"""
-        return prices.ewm(span=period).mean().fillna(0).values
-        
-    def calculate_bollinger_bands(self, prices: pd.Series, period: int = 20, std: float = 2) -> tuple:
-        """Calculate Bollinger Bands"""
-        sma = prices.rolling(window=period).mean()
-        rolling_std = prices.rolling(window=period).std()
-        
-        upper = (sma + (rolling_std * std)).fillna(0).values
-        lower = (sma - (rolling_std * std)).fillna(0).values
-        
-        return upper, lower
-        
-    def calculate_rsi(self, prices: pd.Series, period: int = 14) -> np.ndarray:
-        """Calculate RSI"""
-        delta = prices.diff()
-        gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
-        loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
-        
-        rs = gain / loss
-        rsi = 100 - (100 / (1 + rs))
-        
-        return rsi.fillna(50).values
-        
-    def on_symbol_changed(self, symbol: str):
-        """Handle symbol change"""
-        self.symbol = symbol
-        self.symbol_changed.emit(symbol)
-        
-    def on_timeframe_changed(self, timeframe: str):
-        """Handle timeframe change"""
-        self.timeframe = timeframe
-        self.timeframe_changed.emit(timeframe)
-        
-    # Signals
-    symbol_changed = pyqtSignal(str)
-    timeframe_changed = pyqtSignal(str)
-
-
-class CandlestickItem(pg.GraphicsObject):
-    """Custom candlestick chart item"""
-    
-    def __init__(self):
-        pg.GraphicsObject.__init__(self)
-        self.data = None
-        
-    def setData(self, times, opens, highs, lows, closes):
-        """Set candlestick data"""
-        self.data = {
-            'times': times,
-            'opens': opens,
-            'highs': highs,
-            'lows': lows,
-            'closes': closes
-        }
-        self.prepareGeometryChange()
-        self.update()
-        
-    def paint(self, painter, option, widget):
-        """Paint candlesticks"""
-        if self.data is None:
-            return
-            
-        painter.setPen(pg.mkPen('black', width=1))
-        
-        times = self.data['times']
-        opens = self.data['opens']
-        highs = self.data['highs']
-        lows = self.data['lows']
-        closes = self.data['closes']
-        
-        width = 0.8
-        
-        for i in range(len(times)):
-            x = times[i]
-            o, h, l, c = opens[i], highs[i], lows[i], closes[i]
-            
-            if np.isnan(o) or np.isnan(h) or np.isnan(l) or np.isnan(c):
-                continue
-                
-            # Draw high-low line
-            painter.drawLine(QPointF(x, l), QPointF(x, h))
-            
-            # Draw body
-            if c > o:  # Green candle
-                painter.setBrush(pg.mkBrush('green'))
-                painter.drawRect(QRectF(x - width/2, o, width, c - o))
-            else:  # Red candle
-                painter.setBrush(pg.mkBrush('red'))
-                painter.drawRect(QRectF(x - width/2, c, width, o - c))
-                
-    def boundingRect(self):
-        """Return bounding rectangle"""
-        if self.data is None:
-            return QRectF()
-            
-        times = self.data['times']
-        highs = self.data['highs']
-        lows = self.data['lows']
-        
-        if len(times) == 0:
-            return QRectF()
-            
-        min_time = min(times) - 1
-        max_time = max(times) + 1
-        min_price = min(lows[~np.isnan(lows)])
-        max_price = max(highs[~np.isnan(highs)])
-        
-        return QRectF(min_time, min_price, max_time - min_time, max_price - min_price)
-"""
-Live chart integration for AuraTrade Bot GUI
-Displays real-time price charts with technical indicators
-"""
-
-import pyqtgraph as pg
-from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QComboBox, QLabel
-from PyQt5.QtCore import QTimer, pyqtSignal
-import numpy as np
-from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Any
-
-class TradingChartWidget(QWidget):
-    """Real-time trading chart widget"""
-    
-    symbol_changed = pyqtSignal(str)
-    
-    def __init__(self, data_manager, parent=None):
-        super().__init__(parent)
-        self.data_manager = data_manager
-        self.current_symbol = "EURUSD"
-        self.current_timeframe = "M15"
-        
-        self.setup_ui()
-        self.setup_chart()
-        self.setup_timer()
-        
-    def setup_ui(self):
-        """Setup the user interface"""
-        layout = QVBoxLayout(self)
-        
-        # Control panel
-        control_layout = QHBoxLayout()
-        
-        # Symbol selector
-        control_layout.addWidget(QLabel("Symbol:"))
-        self.symbol_combo = QComboBox()
-        self.symbol_combo.addItems(["EURUSD", "GBPUSD", "USDJPY", "AUDUSD", "XAUUSD", "BTCUSD"])
-        self.symbol_combo.currentTextChanged.connect(self.on_symbol_changed)
-        control_layout.addWidget(self.symbol_combo)
-        
-        # Timeframe selector
-        control_layout.addWidget(QLabel("Timeframe:"))
-        self.timeframe_combo = QComboBox()
-        self.timeframe_combo.addItems(["M1", "M5", "M15", "M30", "H1", "H4", "D1"])
-        self.timeframe_combo.setCurrentText("M15")
-        self.timeframe_combo.currentTextChanged.connect(self.on_timeframe_changed)
-        control_layout.addWidget(self.timeframe_combo)
-        
-        # Refresh button
-        self.refresh_btn = QPushButton("Refresh")
-        self.refresh_btn.clicked.connect(self.refresh_chart)
-        control_layout.addWidget(self.refresh_btn)
-        
-        control_layout.addStretch()
-        layout.addLayout(control_layout)
-        
-        # Chart widget
-        self.chart_widget = pg.PlotWidget()
-        self.chart_widget.setBackground('black')
-        self.chart_widget.showGrid(x=True, y=True, alpha=0.3)
-        layout.addWidget(self.chart_widget)
-        
-    def setup_chart(self):
-        """Setup the chart plotting"""
-        # Main price plot
-        self.price_plot = self.chart_widget.plot(pen=pg.mkPen('cyan', width=2))
-        
-        # Moving averages
-        self.sma20_plot = self.chart_widget.plot(pen=pg.mkPen('yellow', width=1))
-        self.sma50_plot = self.chart_widget.plot(pen=pg.mkPen('orange', width=1))
-        
-        # Support/Resistance lines
-        self.support_line = pg.InfiniteLine(angle=0, pen=pg.mkPen('green', width=2, style=pg.QtCore.Qt.DashLine))
-        self.resistance_line = pg.InfiniteLine(angle=0, pen=pg.mkPen('red', width=2, style=pg.QtCore.Qt.DashLine))
-        
-        self.chart_widget.addItem(self.support_line)
-        self.chart_widget.addItem(self.resistance_line)
-        
-        # Labels
-        self.chart_widget.setLabel('left', 'Price')
-        self.chart_widget.setLabel('bottom', 'Time')
-        self.chart_widget.setTitle(f'{self.current_symbol} - {self.current_timeframe}')
-        
-    def setup_timer(self):
-        """Setup timer for real-time updates"""
-        self.update_timer = QTimer()
-        self.update_timer.timeout.connect(self.update_chart)
-        self.update_timer.start(5000)  # Update every 5 seconds
-        
-    def on_symbol_changed(self, symbol: str):
-        """Handle symbol change"""
-        self.current_symbol = symbol
-        self.symbol_changed.emit(symbol)
-        self.refresh_chart()
-        
-    def on_timeframe_changed(self, timeframe: str):
-        """Handle timeframe change"""
-        self.current_timeframe = timeframe
-        self.refresh_chart()
-        
-    def update_chart(self):
-        """Update chart with latest data"""
-        try:
-            # Get latest data from data manager
-            data = self.data_manager.get_latest_data(self.current_symbol, self.current_timeframe, 200)
-            
-            if data is not None and len(data) > 0:
-                # Extract time and price data
-                times = np.arange(len(data))
-                prices = data['close'].values
-                
-                # Update main price plot
-                self.price_plot.setData(times, prices)
-                
-                # Calculate and plot moving averages
-                if len(prices) >= 20:
-                    sma20 = np.convolve(prices, np.ones(20)/20, mode='valid')
-                    sma20_times = times[19:]
-                    self.sma20_plot.setData(sma20_times, sma20)
-                
-                if len(prices) >= 50:
-                    sma50 = np.convolve(prices, np.ones(50)/50, mode='valid')
-                    sma50_times = times[49:]
-                    self.sma50_plot.setData(sma50_times, sma50)
-                
-                # Update support/resistance levels
-                recent_high = np.max(prices[-50:]) if len(prices) >= 50 else np.max(prices)
-                recent_low = np.min(prices[-50:]) if len(prices) >= 50 else np.min(prices)
-                
-                self.resistance_line.setPos(recent_high)
-                self.support_line.setPos(recent_low)
-                
-                # Update title with current price
-                current_price = prices[-1]
-                self.chart_widget.setTitle(f'{self.current_symbol} - {self.current_timeframe} - {current_price:.5f}')
-                
-        except Exception as e:
-            print(f"Error updating chart: {e}")
-    
-    def refresh_chart(self):
-        """Force refresh the chart"""
-        self.update_chart()
-    
-    def add_trade_marker(self, price: float, trade_type: str, time_index: int = None):
-        """Add trade entry/exit marker to chart"""
-        try:
-            if time_index is None:
-                time_index = len(self.price_plot.getData()[0]) - 1
-            
-            color = 'green' if trade_type.lower() == 'buy' else 'red'
-            symbol = '▲' if trade_type.lower() == 'buy' else '▼'
-            
-            # Add scatter plot for trade marker
-            scatter = pg.ScatterPlotItem([time_index], [price], 
-                                       pen=pg.mkPen(color, width=2),
-                                       brush=pg.mkBrush(color),
-                                       size=15,
-                                       symbol=symbol)
-            
-            self.chart_widget.addItem(scatter)
-            
-        except Exception as e:
-            print(f"Error adding trade marker: {e}")
-"""
-Professional Trading Charts for AuraTrade Bot
-Real-time price charts with technical indicators
-"""
-
-from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QComboBox, QLabel
-from PyQt5.QtCore import Qt, QTimer
-import pyqtgraph as pg
-import pandas as pd
-import numpy as np
-from datetime import datetime, timedelta
 from utils.logger import Logger
 
 class TradingChartWidget(QWidget):
-    """Professional trading chart with technical indicators"""
-    
+    """Trading charts display widget"""
+
     def __init__(self, data_manager, parent=None):
         super().__init__(parent)
-        
+
         self.data_manager = data_manager
         self.logger = Logger().get_logger()
-        
-        # Chart data
+
         self.current_symbol = 'EURUSD'
         self.current_timeframe = 'M15'
-        self.chart_data = None
-        
+
         self.setup_ui()
-        self.setup_chart()
-        self.setup_timers()
-        
+        self.setup_timer()
+
     def setup_ui(self):
         """Setup chart UI"""
         layout = QVBoxLayout(self)
-        
-        # Top controls
+
+        # Controls
         controls_layout = QHBoxLayout()
-        
+
         # Symbol selector
         controls_layout.addWidget(QLabel("Symbol:"))
         self.symbol_combo = QComboBox()
-        self.symbol_combo.addItems(['EURUSD', 'GBPUSD', 'USDJPY', 'XAUUSD', 'USDCAD', 'AUDUSD'])
+        self.symbol_combo.addItems(['EURUSD', 'GBPUSD', 'USDJPY', 'XAUUSD'])
         self.symbol_combo.currentTextChanged.connect(self.on_symbol_changed)
         controls_layout.addWidget(self.symbol_combo)
-        
+
         # Timeframe selector
         controls_layout.addWidget(QLabel("Timeframe:"))
         self.timeframe_combo = QComboBox()
-        self.timeframe_combo.addItems(['M1', 'M5', 'M15', 'M30', 'H1', 'H4', 'D1'])
+        self.timeframe_combo.addItems(['M1', 'M5', 'M15', 'M30', 'H1', 'H4'])
         self.timeframe_combo.setCurrentText('M15')
         self.timeframe_combo.currentTextChanged.connect(self.on_timeframe_changed)
         controls_layout.addWidget(self.timeframe_combo)
-        
+
+        # Refresh button
+        self.refresh_button = QPushButton("Refresh")
+        self.refresh_button.clicked.connect(self.update_chart)
+        controls_layout.addWidget(self.refresh_button)
+
         controls_layout.addStretch()
-        
         layout.addLayout(controls_layout)
-        
-        # Chart widget
-        self.chart_widget = pg.GraphicsLayoutWidget()
-        layout.addWidget(self.chart_widget)
-        
-    def setup_chart(self):
-        """Setup the main chart"""
-        # Configure pyqtgraph
-        pg.setConfigOptions(antialias=True)
-        
-        # Main price plot
-        self.price_plot = self.chart_widget.addPlot(title=f"{self.current_symbol} - {self.current_timeframe}")
-        self.price_plot.setLabel('left', 'Price')
-        self.price_plot.setLabel('bottom', 'Time')
-        self.price_plot.showGrid(x=True, y=True, alpha=0.3)
-        
-        # Candlestick plot
-        self.candlestick_item = CandlestickItem()
-        self.price_plot.addItem(self.candlestick_item)
-        
-        # Moving averages
-        self.ema20_curve = self.price_plot.plot(pen=pg.mkPen(color='yellow', width=1), name='EMA 20')
-        self.ema50_curve = self.price_plot.plot(pen=pg.mkPen(color='blue', width=1), name='EMA 50')
-        
-        # Volume plot
-        self.chart_widget.nextRow()
-        self.volume_plot = self.chart_widget.addPlot(title="Volume")
-        self.volume_plot.setLabel('left', 'Volume')
-        self.volume_plot.setMaximumHeight(100)
-        
-        # RSI plot
-        self.chart_widget.nextRow()
-        self.rsi_plot = self.chart_widget.addPlot(title="RSI")
-        self.rsi_plot.setLabel('left', 'RSI')
-        self.rsi_plot.setMaximumHeight(100)
-        self.rsi_plot.setYRange(0, 100)
-        
-        # RSI reference lines
-        self.rsi_plot.addLine(y=70, pen=pg.mkPen('red', style=Qt.DashLine))
-        self.rsi_plot.addLine(y=30, pen=pg.mkPen('green', style=Qt.DashLine))
-        self.rsi_plot.addLine(y=50, pen=pg.mkPen('gray', style=Qt.DashLine))
-        
-        self.rsi_curve = self.rsi_plot.plot(pen=pg.mkPen(color='purple', width=2))
-        
-        # Link x-axes
-        self.volume_plot.setXLink(self.price_plot)
-        self.rsi_plot.setXLink(self.price_plot)
-        
-    def setup_timers(self):
-        """Setup update timers"""
+
+        # Chart
+        self.figure = Figure(figsize=(12, 8))
+        self.canvas = FigureCanvas(self.figure)
+        layout.addWidget(self.canvas)
+
+        # Set dark theme for chart
+        plt.style.use('dark_background')
+
+    def setup_timer(self):
+        """Setup chart update timer"""
         self.update_timer = QTimer()
         self.update_timer.timeout.connect(self.update_chart)
         self.update_timer.start(5000)  # Update every 5 seconds
-        
+
     def on_symbol_changed(self, symbol):
         """Handle symbol change"""
         self.current_symbol = symbol
-        self.price_plot.setTitle(f"{self.current_symbol} - {self.current_timeframe}")
         self.update_chart()
-        
+
     def on_timeframe_changed(self, timeframe):
         """Handle timeframe change"""
         self.current_timeframe = timeframe
-        self.price_plot.setTitle(f"{self.current_symbol} - {self.current_timeframe}")
         self.update_chart()
-        
+
     def update_chart(self):
-        """Update chart data"""
+        """Update chart display"""
         try:
-            if not hasattr(self.data_manager, 'get_rates'):
-                return
-            
             # Get data
-            data = self.data_manager.get_rates(self.current_symbol, self.current_timeframe, 200)
-            
-            if data is None or len(data) < 20:
+            data = self.data_manager.get_rates(self.current_symbol, self.current_timeframe, 100)
+
+            if data is None or len(data) < 10:
                 return
-            
-            self.chart_data = data
-            
-            # Update candlesticks
-            self.update_candlesticks()
-            
-            # Update indicators
-            self.update_indicators()
-            
-            # Update volume (simulated for forex)
-            self.update_volume()
-            
+
+            # Clear figure
+            self.figure.clear()
+
+            # Create subplots
+            ax1 = self.figure.add_subplot(2, 1, 1)
+            ax2 = self.figure.add_subplot(2, 1, 2)
+
+            # Plot candlestick chart (simplified)
+            self.plot_candlesticks(ax1, data)
+
+            # Plot volume (use tick_volume if available)
+            if 'tick_volume' in data.columns:
+                ax2.bar(range(len(data)), data['tick_volume'], color='blue', alpha=0.7)
+                ax2.set_title('Volume')
+            else:
+                # Plot RSI instead
+                self.plot_rsi(ax2, data)
+
+            # Format chart
+            ax1.set_title(f"{self.current_symbol} - {self.current_timeframe}")
+            ax1.grid(True, alpha=0.3)
+            ax2.grid(True, alpha=0.3)
+
+            # Adjust layout
+            self.figure.tight_layout()
+
+            # Refresh canvas
+            self.canvas.draw()
+
         except Exception as e:
             self.logger.error(f"Error updating chart: {e}")
-    
-    def update_candlesticks(self):
-        """Update candlestick data"""
+
+    def plot_candlesticks(self, ax, data):
+        """Plot simple candlestick chart"""
         try:
-            if self.chart_data is None:
-                return
-            
-            # Prepare candlestick data
-            times = np.arange(len(self.chart_data))
-            opens = self.chart_data['open'].values
-            highs = self.chart_data['high'].values
-            lows = self.chart_data['low'].values
-            closes = self.chart_data['close'].values
-            
-            self.candlestick_item.setData(times, opens, highs, lows, closes)
-            
+            # Use simple line chart for now (candlesticks require mplfinance)
+            ax.plot(data.index, data['close'], label='Close', color='white', linewidth=1)
+
+            # Add moving averages
+            if len(data) >= 20:
+                sma_20 = data['close'].rolling(20).mean()
+                ax.plot(data.index, sma_20, label='SMA 20', color='yellow', alpha=0.7)
+
+            if len(data) >= 50:
+                sma_50 = data['close'].rolling(50).mean()
+                ax.plot(data.index, sma_50, label='SMA 50', color='orange', alpha=0.7)
+
+            ax.legend()
+            ax.set_ylabel('Price')
+
         except Exception as e:
-            self.logger.error(f"Error updating candlesticks: {e}")
-    
-    def update_indicators(self):
-        """Update technical indicators"""
+            self.logger.error(f"Error plotting candlesticks: {e}")
+
+    def plot_rsi(self, ax, data):
+        """Plot RSI indicator"""
         try:
-            if self.chart_data is None:
-                return
-            
-            # Calculate EMAs
-            ema20 = self.chart_data['close'].ewm(span=20).mean()
-            ema50 = self.chart_data['close'].ewm(span=50).mean()
-            
             # Calculate RSI
-            rsi = self.calculate_rsi(self.chart_data['close'], 14)
-            
-            # Update plots
-            times = np.arange(len(self.chart_data))
-            
-            self.ema20_curve.setData(times, ema20.values)
-            self.ema50_curve.setData(times, ema50.values)
-            self.rsi_curve.setData(times, rsi.values)
-            
+            rsi = self.calculate_rsi(data['close'], 14)
+
+            ax.plot(data.index, rsi, label='RSI', color='purple')
+            ax.axhline(y=70, color='red', linestyle='--', alpha=0.7)
+            ax.axhline(y=30, color='green', linestyle='--', alpha=0.7)
+            ax.axhline(y=50, color='white', linestyle='-', alpha=0.3)
+
+            ax.set_ylim(0, 100)
+            ax.set_title('RSI (14)')
+            ax.legend()
+
         except Exception as e:
-            self.logger.error(f"Error updating indicators: {e}")
-    
-    def update_volume(self):
-        """Update volume data (simulated for forex)"""
+            self.logger.error(f"Error plotting RSI: {e}")
+
+    def calculate_rsi(self, series, period=14):
+        """Calculate RSI"""
         try:
-            if self.chart_data is None:
-                return
-            
-            # Simulate volume based on price movement
-            price_range = self.chart_data['high'] - self.chart_data['low']
-            volume = price_range * 1000  # Simulated volume
-            
-            times = np.arange(len(self.chart_data))
-            
-            # Clear previous volume bars
-            self.volume_plot.clear()
-            
-            # Create volume bars
-            bar_graph = pg.BarGraphItem(x=times, height=volume.values, width=0.8, brush='cyan')
-            self.volume_plot.addItem(bar_graph)
-            
-        except Exception as e:
-            self.logger.error(f"Error updating volume: {e}")
-    
-    def calculate_rsi(self, prices, period=14):
-        """Calculate RSI indicator"""
-        try:
-            delta = prices.diff()
+            delta = series.diff()
             gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
             loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
-            
+
             rs = gain / loss
             rsi = 100 - (100 / (1 + rs))
-            
-            return rsi
-            
-        except Exception as e:
-            self.logger.error(f"Error calculating RSI: {e}")
-            return pd.Series([50] * len(prices), index=prices.index)
 
-class CandlestickItem(pg.GraphicsObject):
-    """Custom candlestick item for pyqtgraph"""
-    
-    def __init__(self):
-        pg.GraphicsObject.__init__(self)
-        self.data = None
-        
-    def setData(self, times, opens, highs, lows, closes):
-        """Set candlestick data"""
-        self.data = {
-            'times': times,
-            'opens': opens,
-            'highs': highs,
-            'lows': lows,
-            'closes': closes
-        }
-        self.generatePicture()
-        
-    def generatePicture(self):
-        """Generate the candlestick picture"""
-        if self.data is None:
-            return
-            
-        self.picture = pg.QtGui.QPicture()
-        painter = pg.QtGui.QPainter(self.picture)
-        
-        times = self.data['times']
-        opens = self.data['opens']
-        highs = self.data['highs']
-        lows = self.data['lows']
-        closes = self.data['closes']
-        
-        width = 0.8
-        
-        for i in range(len(times)):
-            t = times[i]
-            o = opens[i]
-            h = highs[i]
-            l = lows[i]
-            c = closes[i]
-            
-            # Determine color
-            if c > o:  # Bullish
-                color = pg.QtGui.QColor(0, 255, 0)  # Green
-            else:  # Bearish
-                color = pg.QtGui.QColor(255, 0, 0)  # Red
-            
-            painter.setPen(pg.mkPen(color))
-            painter.setBrush(pg.mkBrush(color))
-            
-            # Draw wick
-            painter.drawLine(pg.QtCore.QPointF(t, l), pg.QtCore.QPointF(t, h))
-            
-            # Draw body
-            body_rect = pg.QtCore.QRectF(t - width/2, min(o, c), width, abs(c - o))
-            painter.drawRect(body_rect)
-        
-        painter.end()
-        
-    def paint(self, painter, option, widget):
-        """Paint the candlesticks"""
-        if hasattr(self, 'picture'):
-            painter.drawPicture(0, 0, self.picture)
-            
-    def boundingRect(self):
-        """Return bounding rectangle"""
-        if self.data is None:
-            return pg.QtCore.QRectF()
-        
-        times = self.data['times']
-        highs = self.data['highs']
-        lows = self.data['lows']
-        
-        return pg.QtCore.QRectF(
-            times.min() - 1, lows.min(),
-            times.max() - times.min() + 2, highs.max() - lows.min()
-        )
+            return rsi
+
+        except Exception:
+            return pd.Series()

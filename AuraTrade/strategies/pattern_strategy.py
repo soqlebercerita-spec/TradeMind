@@ -1,339 +1,260 @@
-
 """
-Pattern Recognition Strategy for AuraTrade Bot
-Identifies candlestick patterns and chart patterns
+Pattern recognition strategy for AuraTrade Bot
 """
 
 import pandas as pd
 import numpy as np
-from typing import Dict, List, Optional, Any
+from typing import Dict, Any, Optional, List
+from datetime import datetime
 from utils.logger import Logger
 
 class PatternStrategy:
-    """Pattern recognition strategy implementation"""
-    
+    """Pattern recognition strategy"""
+
     def __init__(self):
         self.logger = Logger().get_logger()
-        self.name = "Pattern_Strategy"
         self.enabled = True
-        
-        # Pattern parameters
-        self.min_body_ratio = 0.6
-        self.doji_threshold = 0.1
-        self.hammer_ratio = 2.0
-        
-    def analyze_signal(self, symbol: str, data: pd.DataFrame, 
-                      current_price: tuple, market_condition: Dict) -> Optional[Dict[str, Any]]:
+        self.name = "Pattern"
+
+        # Strategy parameters
+        self.min_confidence = 65.0
+        self.pattern_target = 15.0  # pips
+        self.stop_loss = 10.0  # pips
+
+    def analyze_signal(self, symbol: str, data: pd.DataFrame, current_price: tuple, 
+                      market_condition: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Analyze pattern signals"""
         try:
-            if not self.enabled or len(data) < 10:
+            if len(data) < 50:
                 return None
-            
-            # Get recent candles
-            recent_candles = data.tail(5)
-            
-            # Detect patterns
-            patterns = self._detect_patterns(recent_candles)
-            
+
+            # Check for various patterns
+            patterns = self._detect_patterns(data)
+
             if not patterns:
                 return None
-            
-            # Evaluate strongest pattern
-            strongest_pattern = max(patterns, key=lambda x: x['strength'])
-            
-            if strongest_pattern['strength'] > 70:
+
+            # Select strongest pattern
+            best_pattern = max(patterns, key=lambda x: x['confidence'])
+
+            if best_pattern['confidence'] >= self.min_confidence:
                 bid, ask = current_price
-                
+                current = (bid + ask) / 2
+
                 return {
-                    'strategy': self.name,
-                    'signal': strongest_pattern['signal'],
-                    'confidence': strongest_pattern['strength'],
-                    'entry_price': ask if strongest_pattern['signal'] == 'buy' else bid,
-                    'stop_loss_pips': 4.0,
-                    'take_profit_pips': 6.0,
-                    'risk_percent': 1.5,
-                    'timeframe': 'M15',
-                    'reason': f"Pattern: {strongest_pattern['name']}"
+                    'signal': best_pattern['signal'],
+                    'confidence': best_pattern['confidence'],
+                    'entry_price': current,
+                    'stop_loss_pips': self.stop_loss,
+                    'take_profit_pips': self.pattern_target,
+                    'risk_percent': 1.0,
+                    'strategy': f"{self.name}-{best_pattern['pattern']}",
+                    'timeframe': 'M15'
                 }
-            
+
             return None
-            
+
         except Exception as e:
             self.logger.error(f"Error in pattern strategy analysis: {e}")
             return None
-    
-    def _detect_patterns(self, candles: pd.DataFrame) -> List[Dict[str, Any]]:
-        """Detect candlestick patterns"""
+
+    def _detect_patterns(self, data: pd.DataFrame) -> List[Dict[str, Any]]:
+        """Detect various chart patterns"""
         patterns = []
-        
+
         try:
-            if len(candles) < 3:
-                return patterns
-            
-            # Get last few candles
-            c1, c2, c3 = candles.iloc[-3], candles.iloc[-2], candles.iloc[-1]
-            
-            # Hammer pattern
-            hammer = self._detect_hammer(c3)
-            if hammer:
-                patterns.append(hammer)
-            
-            # Doji pattern
-            doji = self._detect_doji(c3)
-            if doji:
-                patterns.append(doji)
-            
-            # Engulfing pattern
-            engulfing = self._detect_engulfing(c2, c3)
+            # Engulfing patterns
+            engulfing = self._detect_engulfing(data)
             if engulfing:
                 patterns.append(engulfing)
-            
-            # Morning/Evening star
-            star = self._detect_star_pattern(c1, c2, c3)
-            if star:
-                patterns.append(star)
-            
-            # Pin bar
-            pin_bar = self._detect_pin_bar(c3)
-            if pin_bar:
-                patterns.append(pin_bar)
-            
-            return patterns
-            
+
+            # Hammer/Doji patterns
+            hammer = self._detect_hammer(data)
+            if hammer:
+                patterns.append(hammer)
+
+            # Double top/bottom
+            double_pattern = self._detect_double_topbottom(data)
+            if double_pattern:
+                patterns.append(double_pattern)
+
+            # Support/Resistance break
+            break_pattern = self._detect_breakout(data)
+            if break_pattern:
+                patterns.append(break_pattern)
+
         except Exception as e:
             self.logger.error(f"Error detecting patterns: {e}")
-            return []
-    
-    def _detect_hammer(self, candle: pd.Series) -> Optional[Dict[str, Any]]:
-        """Detect hammer/hanging man pattern"""
+
+        return patterns
+
+    def _detect_engulfing(self, data: pd.DataFrame) -> Optional[Dict[str, Any]]:
+        """Detect bullish/bearish engulfing patterns"""
         try:
-            body = abs(candle['close'] - candle['open'])
-            lower_shadow = candle['open'] - candle['low'] if candle['close'] > candle['open'] else candle['close'] - candle['low']
-            upper_shadow = candle['high'] - candle['close'] if candle['close'] > candle['open'] else candle['high'] - candle['open']
-            
-            total_range = candle['high'] - candle['low']
-            
-            if total_range == 0:
+            if len(data) < 3:
                 return None
-            
-            # Hammer criteria
-            if (lower_shadow > body * 2 and 
-                upper_shadow < body * 0.5 and 
-                body / total_range > 0.1):
-                
-                signal = 'buy' if candle['close'] > candle['open'] else 'sell'
-                strength = 75 if candle['close'] > candle['open'] else 65
-                
-                return {
-                    'name': 'Hammer',
-                    'signal': signal,
-                    'strength': strength
-                }
-            
-            return None
-            
-        except Exception as e:
-            self.logger.error(f"Error detecting hammer: {e}")
-            return None
-    
-    def _detect_doji(self, candle: pd.Series) -> Optional[Dict[str, Any]]:
-        """Detect doji pattern"""
-        try:
-            body = abs(candle['close'] - candle['open'])
-            total_range = candle['high'] - candle['low']
-            
-            if total_range == 0:
-                return None
-            
-            # Doji criteria
-            if body / total_range < self.doji_threshold:
-                return {
-                    'name': 'Doji',
-                    'signal': 'neutral',
-                    'strength': 60
-                }
-            
-            return None
-            
-        except Exception as e:
-            self.logger.error(f"Error detecting doji: {e}")
-            return None
-    
-    def _detect_engulfing(self, prev_candle: pd.Series, current_candle: pd.Series) -> Optional[Dict[str, Any]]:
-        """Detect bullish/bearish engulfing pattern"""
-        try:
+
+            # Get last two candles
+            prev = data.iloc[-2]
+            current = data.iloc[-1]
+
             # Bullish engulfing
-            if (prev_candle['close'] < prev_candle['open'] and  # Previous bearish
-                current_candle['close'] > current_candle['open'] and  # Current bullish
-                current_candle['open'] < prev_candle['close'] and  # Opens below prev close
-                current_candle['close'] > prev_candle['open']):  # Closes above prev open
-                
+            if (prev['close'] < prev['open'] and  # Previous red candle
+                current['close'] > current['open'] and  # Current green candle
+                current['open'] < prev['close'] and  # Opens below previous close
+                current['close'] > prev['open']):  # Closes above previous open
+
                 return {
-                    'name': 'Bullish Engulfing',
+                    'pattern': 'Bullish Engulfing',
                     'signal': 'buy',
-                    'strength': 80
+                    'confidence': 75.0
                 }
-            
+
             # Bearish engulfing
-            elif (prev_candle['close'] > prev_candle['open'] and  # Previous bullish
-                  current_candle['close'] < current_candle['open'] and  # Current bearish
-                  current_candle['open'] > prev_candle['close'] and  # Opens above prev close
-                  current_candle['close'] < prev_candle['open']):  # Closes below prev open
-                
+            elif (prev['close'] > prev['open'] and  # Previous green candle
+                  current['close'] < current['open'] and  # Current red candle
+                  current['open'] > prev['close'] and  # Opens above previous close
+                  current['close'] < prev['open']):  # Closes below previous open
+
                 return {
-                    'name': 'Bearish Engulfing',
+                    'pattern': 'Bearish Engulfing',
                     'signal': 'sell',
-                    'strength': 80
+                    'confidence': 75.0
                 }
-            
+
             return None
-            
+
         except Exception as e:
-            self.logger.error(f"Error detecting engulfing: {e}")
+            self.logger.error(f"Error detecting engulfing pattern: {e}")
             return None
-    
-    def _detect_star_pattern(self, c1: pd.Series, c2: pd.Series, c3: pd.Series) -> Optional[Dict[str, Any]]:
-        """Detect morning/evening star pattern"""
+
+    def _detect_hammer(self, data: pd.DataFrame) -> Optional[Dict[str, Any]]:
+        """Detect hammer/doji patterns"""
         try:
-            # Morning star
-            if (c1['close'] < c1['open'] and  # First candle bearish
-                abs(c2['close'] - c2['open']) < (c1['high'] - c1['low']) * 0.3 and  # Second candle small
-                c3['close'] > c3['open'] and  # Third candle bullish
-                c3['close'] > (c1['open'] + c1['close']) / 2):  # Third closes above midpoint of first
-                
-                return {
-                    'name': 'Morning Star',
-                    'signal': 'buy',
-                    'strength': 85
-                }
-            
-            # Evening star
-            elif (c1['close'] > c1['open'] and  # First candle bullish
-                  abs(c2['close'] - c2['open']) < (c1['high'] - c1['low']) * 0.3 and  # Second candle small
-                  c3['close'] < c3['open'] and  # Third candle bearish
-                  c3['close'] < (c1['open'] + c1['close']) / 2):  # Third closes below midpoint of first
-                
-                return {
-                    'name': 'Evening Star',
-                    'signal': 'sell',
-                    'strength': 85
-                }
-            
-            return None
-            
-        except Exception as e:
-            self.logger.error(f"Error detecting star pattern: {e}")
-            return None
-    
-    def _detect_pin_bar(self, candle: pd.Series) -> Optional[Dict[str, Any]]:
-        """Detect pin bar pattern"""
-        try:
-            body = abs(candle['close'] - candle['open'])
-            upper_shadow = candle['high'] - max(candle['open'], candle['close'])
-            lower_shadow = min(candle['open'], candle['close']) - candle['low']
-            total_range = candle['high'] - candle['low']
-            
+            if len(data) < 2:
+                return None
+
+            current = data.iloc[-1]
+
+            # Calculate candle properties
+            body = abs(current['close'] - current['open'])
+            upper_shadow = current['high'] - max(current['open'], current['close'])
+            lower_shadow = min(current['open'], current['close']) - current['low']
+            total_range = current['high'] - current['low']
+
             if total_range == 0:
                 return None
-            
-            # Bullish pin bar (hammer-like)
-            if lower_shadow > body * 3 and upper_shadow < body:
+
+            # Hammer pattern (bullish)
+            if (lower_shadow >= 2 * body and
+                upper_shadow <= 0.1 * total_range and
+                body <= 0.3 * total_range):
+
                 return {
-                    'name': 'Bullish Pin Bar',
+                    'pattern': 'Hammer',
                     'signal': 'buy',
-                    'strength': 75
+                    'confidence': 70.0
                 }
-            
-            # Bearish pin bar (shooting star-like)
-            elif upper_shadow > body * 3 and lower_shadow < body:
+
+            # Shooting star (bearish)
+            elif (upper_shadow >= 2 * body and
+                  lower_shadow <= 0.1 * total_range and
+                  body <= 0.3 * total_range):
+
                 return {
-                    'name': 'Bearish Pin Bar',
+                    'pattern': 'Shooting Star',
                     'signal': 'sell',
-                    'strength': 75
+                    'confidence': 70.0
                 }
-            
+
             return None
-            
+
         except Exception as e:
-            self.logger.error(f"Error detecting pin bar: {e}")
+            self.logger.error(f"Error detecting hammer pattern: {e}")
             return None
-    
-    def get_strategy_info(self) -> Dict[str, Any]:
-        """Get strategy information"""
-        return {
-            'name': self.name,
-            'enabled': self.enabled,
-            'type': 'Pattern Recognition',
-            'timeframe': 'M15',
-            'parameters': {
-                'min_body_ratio': self.min_body_ratio,
-                'doji_threshold': self.doji_threshold,
-                'hammer_ratio': self.hammer_ratio
-            }
-        }
-"""
-Pattern Recognition Strategy for AuraTrade
-Advanced pattern detection with high win rate
-"""
 
-import pandas as pd
-from typing import Dict, Any, Optional
-from datetime import datetime
-
-class PatternStrategy:
-    """Pattern Recognition Strategy"""
-    
-    def __init__(self):
-        self.enabled = True
-        self.name = "Pattern"
-        self.min_confidence = 65
-        
-    def analyze_signal(self, symbol: str, data: pd.DataFrame, 
-                      current_price: tuple, market_condition: Dict) -> Optional[Dict[str, Any]]:
-        """Analyze pattern-based signals"""
+    def _detect_double_topbottom(self, data: pd.DataFrame) -> Optional[Dict[str, Any]]:
+        """Detect double top/bottom patterns"""
         try:
-            if len(data) < 100:
+            if len(data) < 20:
                 return None
-                
-            latest = data.iloc[-1]
-            bid, ask = current_price
-            
-            # MACD signals
-            macd = latest.get('macd', 0)
-            macd_signal = latest.get('macd_signal', 0)
-            macd_histogram = latest.get('macd_histogram', 0)
-            
-            # Stochastic
-            stoch_k = latest.get('stoch_k', 50)
-            stoch_d = latest.get('stoch_d', 50)
-            
-            signal = None
-            confidence = 0
-            
-            # Bullish divergence
-            if (macd > macd_signal and macd_histogram > 0 and 
-                stoch_k < 20 and stoch_k > stoch_d):
-                signal = 'buy'
-                confidence = 70
-                
-            # Bearish divergence
-            elif (macd < macd_signal and macd_histogram < 0 and 
-                  stoch_k > 80 and stoch_k < stoch_d):
-                signal = 'sell'
-                confidence = 70
-                
-            if signal and confidence >= self.min_confidence:
-                return {
-                    'signal': signal,
-                    'entry_price': ask if signal == 'buy' else bid,
-                    'confidence': confidence,
-                    'strategy': self.name,
-                    'stop_loss_pips': 3.0,
-                    'take_profit_pips': 6.0,
-                    'risk_percent': 1.5
-                }
-                
+
+            recent_data = data.tail(20)
+            highs = recent_data['high']
+            lows = recent_data['low']
+
+            # Find peaks and troughs
+            peaks = []
+            troughs = []
+
+            for i in range(2, len(recent_data) - 2):
+                # Peak detection
+                if (highs.iloc[i] > highs.iloc[i-1] and highs.iloc[i] > highs.iloc[i-2] and
+                    highs.iloc[i] > highs.iloc[i+1] and highs.iloc[i] > highs.iloc[i+2]):
+                    peaks.append(highs.iloc[i])
+
+                # Trough detection
+                if (lows.iloc[i] < lows.iloc[i-1] and lows.iloc[i] < lows.iloc[i-2] and
+                    lows.iloc[i] < lows.iloc[i+1] and lows.iloc[i] < lows.iloc[i+2]):
+                    troughs.append(lows.iloc[i])
+
+            # Double top
+            if len(peaks) >= 2:
+                last_two_peaks = peaks[-2:]
+                if abs(last_two_peaks[0] - last_two_peaks[1]) / last_two_peaks[0] < 0.002:  # Within 0.2%
+                    return {
+                        'pattern': 'Double Top',
+                        'signal': 'sell',
+                        'confidence': 68.0
+                    }
+
+            # Double bottom
+            if len(troughs) >= 2:
+                last_two_troughs = troughs[-2:]
+                if abs(last_two_troughs[0] - last_two_troughs[1]) / last_two_troughs[0] < 0.002:  # Within 0.2%
+                    return {
+                        'pattern': 'Double Bottom',
+                        'signal': 'buy',
+                        'confidence': 68.0
+                    }
+
             return None
-            
+
         except Exception as e:
+            self.logger.error(f"Error detecting double top/bottom: {e}")
+            return None
+
+    def _detect_breakout(self, data: pd.DataFrame) -> Optional[Dict[str, Any]]:
+        """Detect support/resistance breakouts"""
+        try:
+            if len(data) < 30:
+                return None
+
+            recent_data = data.tail(20)
+            current_price = data['close'].iloc[-1]
+
+            # Calculate support and resistance
+            resistance = recent_data['high'].rolling(10).max().iloc[-1]
+            support = recent_data['low'].rolling(10).min().iloc[-1]
+
+            # Breakout above resistance
+            if current_price > resistance * 1.001:  # 0.1% above resistance
+                return {
+                    'pattern': 'Resistance Breakout',
+                    'signal': 'buy',
+                    'confidence': 72.0
+                }
+
+            # Breakdown below support
+            elif current_price < support * 0.999:  # 0.1% below support
+                return {
+                    'pattern': 'Support Breakdown',
+                    'signal': 'sell',
+                    'confidence': 72.0
+                }
+
+            return None
+
+        except Exception as e:
+            self.logger.error(f"Error detecting breakout: {e}")
             return None
