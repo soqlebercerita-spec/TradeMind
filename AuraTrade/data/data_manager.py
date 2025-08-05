@@ -1,363 +1,362 @@
 
 """
-Data Manager for AuraTrade Bot
-Handles real-time data feeds and market analysis
+Data management system for AuraTrade Bot
+Handles real-time market data and historical analysis
 """
 
-import pandas as pd
-import numpy as np
-import threading
 import time
+import threading
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Any, Callable
-from utils.logger import Logger
+from typing import Dict, List, Optional, Any
+import pandas as pd
+from core.mt5_connector import MT5Connector
+from utils.logger import Logger, log_error
 
 class DataManager:
-    """Real-time data management and processing"""
+    """Manages market data feeds and historical analysis"""
     
-    def __init__(self, mt5_connector):
+    def __init__(self, mt5_connector: MT5Connector):
         self.logger = Logger().get_logger()
         self.mt5_connector = mt5_connector
-        self.data_cache = {}
-        self.subscribers = {}
-        self.update_thread = None
-        self.running = False
+        
+        # Data storage
+        self.live_data = {}
+        self.historical_data = {}
+        self.tick_data = {}
+        
+        # Data update thread
+        self.data_thread = None
+        self.update_running = False
         self.update_interval = 1  # seconds
         
-        self.logger.info("DataManager initialized")
+        # Symbols to track
+        self.active_symbols = []
+        
+        self.logger.info("Data Manager initialized")
     
     def start_data_updates(self, symbols: List[str]):
-        """Start real-time data updates"""
+        """Start real-time data updates for symbols"""
         try:
-            self.symbols = symbols
-            self.running = True
+            self.active_symbols = symbols
             
-            # Initialize data cache
+            if self.update_running:
+                self.logger.warning("Data updates already running")
+                return
+            
+            self.logger.info(f"Starting data updates for symbols: {symbols}")
+            
+            # Initialize data storage
             for symbol in symbols:
-                self.data_cache[symbol] = {
-                    'rates': pd.DataFrame(),
-                    'last_update': None,
-                    'subscribers': []
+                self.live_data[symbol] = {
+                    'bid': 0.0,
+                    'ask': 0.0,
+                    'spread': 0.0,
+                    'last_update': None
                 }
-                
-                # Get initial data
-                initial_data = self.mt5_connector.get_rates(symbol, 'M1', 1000)
-                if not initial_data.empty:
-                    self.data_cache[symbol]['rates'] = initial_data
-                    self.data_cache[symbol]['last_update'] = datetime.now()
+                self.tick_data[symbol] = []
+                self.historical_data[symbol] = None
+            
+            # Load initial historical data
+            self._load_historical_data()
             
             # Start update thread
-            self.update_thread = threading.Thread(target=self._update_loop, daemon=True)
-            self.update_thread.start()
+            self.update_running = True
+            self.data_thread = threading.Thread(target=self._data_update_loop, daemon=True)
+            self.data_thread.start()
             
-            self.logger.info(f"Started data updates for {len(symbols)} symbols")
+            self.logger.info("Data updates started successfully")
             
         except Exception as e:
-            self.logger.error(f"Error starting data updates: {e}")
+            log_error("DataManager", "Failed to start data updates", e)
     
     def stop_data_updates(self):
-        """Stop data updates"""
+        """Stop real-time data updates"""
         try:
-            self.running = False
+            self.logger.info("Stopping data updates...")
+            self.update_running = False
             
-            if self.update_thread and self.update_thread.is_alive():
-                self.update_thread.join(timeout=5)
+            if self.data_thread and self.data_thread.is_alive():
+                self.data_thread.join(timeout=5)
             
             self.logger.info("Data updates stopped")
             
         except Exception as e:
-            self.logger.error(f"Error stopping data updates: {e}")
+            log_error("DataManager", "Error stopping data updates", e)
     
-    def _update_loop(self):
+    def _data_update_loop(self):
         """Main data update loop"""
-        while self.running:
+        self.logger.info("Data update loop started")
+        
+        while self.update_running:
             try:
-                for symbol in self.symbols:
-                    if symbol in self.data_cache:
-                        self._update_symbol_data(symbol)
+                start_time = time.time()
                 
-                time.sleep(self.update_interval)
+                # Update live data for all symbols
+                for symbol in self.active_symbols:
+                    self._update_symbol_data(symbol)
+                
+                # Performance monitoring
+                loop_time = time.time() - start_time
+                
+                # Sleep to maintain update interval
+                sleep_time = max(0, self.update_interval - loop_time)
+                time.sleep(sleep_time)
                 
             except Exception as e:
-                self.logger.error(f"Error in data update loop: {e}")
-                time.sleep(5)
+                log_error("DataManager", "Error in data update loop", e)
+                time.sleep(1)
+        
+        self.logger.info("Data update loop stopped")
     
     def _update_symbol_data(self, symbol: str):
-        """Update data for specific symbol"""
+        """Update data for a single symbol"""
         try:
-            # Get current price
-            symbol_info = self.mt5_connector.get_symbol_info(symbol)
-            if not symbol_info:
+            # Get current tick
+            tick = self.mt5_connector.get_tick(symbol)
+            if not tick:
                 return
             
-            current_time = datetime.now()
-            current_price = symbol_info['bid']
+            # Update live data
+            bid = tick['bid']
+            ask = tick['ask']
+            spread = ask - bid
             
-            # Create new data point
-            new_data = pd.DataFrame({
-                'time': [current_time],
-                'open': [current_price],
-                'high': [current_price * 1.0001],
-                'low': [current_price * 0.9999],
-                'close': [current_price],
-                'tick_volume': [np.random.randint(50, 200)]
+            self.live_data[symbol].update({
+                'bid': bid,
+                'ask': ask,
+                'spread': spread,
+                'last_update': datetime.now()
             })
-            new_data.set_index('time', inplace=True)
             
-            # Update cache
-            if symbol in self.data_cache:
-                # Append new data
-                self.data_cache[symbol]['rates'] = pd.concat([
-                    self.data_cache[symbol]['rates'][-999:],  # Keep last 999 bars
-                    new_data
-                ])
-                self.data_cache[symbol]['last_update'] = current_time
+            # Store tick data (keep last 1000 ticks)
+            tick_record = {
+                'timestamp': datetime.now(),
+                'bid': bid,
+                'ask': ask,
+                'spread': spread
+            }
+            
+            self.tick_data[symbol].append(tick_record)
+            if len(self.tick_data[symbol]) > 1000:
+                self.tick_data[symbol] = self.tick_data[symbol][-1000:]
+            
+        except Exception as e:
+            log_error("DataManager", f"Error updating data for {symbol}", e)
+    
+    def _load_historical_data(self):
+        """Load historical data for all symbols"""
+        try:
+            for symbol in self.active_symbols:
+                # Get historical rates (last 500 bars)
+                rates = self.mt5_connector.get_rates(symbol, 1, 0, 500)
                 
-                # Notify subscribers
-                self._notify_subscribers(symbol, new_data)
-                
+                if rates is not None and len(rates) > 0:
+                    self.historical_data[symbol] = rates
+                    self.logger.info(f"Loaded {len(rates)} historical bars for {symbol}")
+                else:
+                    self.logger.warning(f"No historical data available for {symbol}")
+                    
         except Exception as e:
-            self.logger.error(f"Error updating data for {symbol}: {e}")
+            log_error("DataManager", "Error loading historical data", e)
     
-    def _notify_subscribers(self, symbol: str, new_data: pd.DataFrame):
-        """Notify subscribers of new data"""
-        try:
-            if symbol in self.subscribers:
-                for callback in self.subscribers[symbol]:
-                    try:
-                        callback(symbol, new_data)
-                    except Exception as e:
-                        self.logger.error(f"Error notifying subscriber: {e}")
-                        
-        except Exception as e:
-            self.logger.error(f"Error notifying subscribers for {symbol}: {e}")
+    def get_live_data(self, symbol: str) -> Optional[Dict[str, Any]]:
+        """Get current live data for symbol"""
+        return self.live_data.get(symbol)
     
-    def subscribe(self, symbol: str, callback: Callable):
-        """Subscribe to data updates"""
+    def get_historical_data(self, symbol: str, bars: int = None) -> Optional[pd.DataFrame]:
+        """Get historical data for symbol"""
         try:
-            if symbol not in self.subscribers:
-                self.subscribers[symbol] = []
+            data = self.historical_data.get(symbol)
             
-            self.subscribers[symbol].append(callback)
-            self.logger.debug(f"New subscriber added for {symbol}")
-            
-        except Exception as e:
-            self.logger.error(f"Error subscribing to {symbol}: {e}")
-    
-    def get_latest_data(self, symbol: str, count: int = 100) -> pd.DataFrame:
-        """Get latest data for symbol"""
-        try:
-            if symbol not in self.data_cache:
-                # Try to get data from MT5
-                data = self.mt5_connector.get_rates(symbol, 'M1', count)
-                if not data.empty:
-                    self.data_cache[symbol] = {
-                        'rates': data,
-                        'last_update': datetime.now(),
-                        'subscribers': []
-                    }
-                return data
-            
-            return self.data_cache[symbol]['rates'].tail(count)
-            
-        except Exception as e:
-            self.logger.error(f"Error getting latest data for {symbol}: {e}")
-            return pd.DataFrame()
-    
-    def get_current_price(self, symbol: str) -> Dict[str, float]:
-        """Get current bid/ask prices"""
-        try:
-            symbol_info = self.mt5_connector.get_symbol_info(symbol)
-            if symbol_info:
-                return {
-                    'bid': symbol_info['bid'],
-                    'ask': symbol_info['ask'],
-                    'spread': symbol_info['ask'] - symbol_info['bid']
-                }
-            
-            return {'bid': 0.0, 'ask': 0.0, 'spread': 0.0}
-            
-        except Exception as e:
-            self.logger.error(f"Error getting current price for {symbol}: {e}")
-            return {'bid': 0.0, 'ask': 0.0, 'spread': 0.0}
-    
-    def calculate_technical_indicators(self, symbol: str, data: pd.DataFrame = None) -> Dict[str, Any]:
-        """Calculate technical indicators"""
-        try:
             if data is None:
-                data = self.get_latest_data(symbol, 200)
+                # Try to fetch fresh data
+                data = self.mt5_connector.get_rates(symbol, 1, 0, bars or 100)
+                if data is not None:
+                    self.historical_data[symbol] = data
             
-            if data.empty or len(data) < 20:
+            if data is not None and bars:
+                return data.tail(bars)
+            
+            return data
+            
+        except Exception as e:
+            log_error("DataManager", f"Error getting historical data for {symbol}", e)
+            return None
+    
+    def get_tick_data(self, symbol: str, count: int = None) -> List[Dict[str, Any]]:
+        """Get recent tick data for symbol"""
+        try:
+            ticks = self.tick_data.get(symbol, [])
+            
+            if count:
+                return ticks[-count:]
+            
+            return ticks
+            
+        except Exception as e:
+            log_error("DataManager", f"Error getting tick data for {symbol}", e)
+            return []
+    
+    def calculate_spread_statistics(self, symbol: str, minutes: int = 60) -> Dict[str, float]:
+        """Calculate spread statistics for the last N minutes"""
+        try:
+            cutoff_time = datetime.now() - timedelta(minutes=minutes)
+            recent_ticks = [
+                tick for tick in self.tick_data.get(symbol, [])
+                if tick['timestamp'] >= cutoff_time
+            ]
+            
+            if not recent_ticks:
                 return {}
             
-            indicators = {}
+            spreads = [tick['spread'] for tick in recent_ticks]
             
-            # Simple Moving Averages
-            indicators['sma_20'] = data['close'].rolling(20).mean().iloc[-1] if len(data) >= 20 else 0
-            indicators['sma_50'] = data['close'].rolling(50).mean().iloc[-1] if len(data) >= 50 else 0
-            
-            # Exponential Moving Averages
-            indicators['ema_12'] = data['close'].ewm(span=12).mean().iloc[-1] if len(data) >= 12 else 0
-            indicators['ema_26'] = data['close'].ewm(span=26).mean().iloc[-1] if len(data) >= 26 else 0
-            
-            # RSI
-            indicators['rsi'] = self._calculate_rsi(data['close'], 14)
-            
-            # Bollinger Bands
-            bb_data = self._calculate_bollinger_bands(data['close'], 20, 2)
-            indicators.update(bb_data)
-            
-            # MACD
-            macd_data = self._calculate_macd(data['close'])
-            indicators.update(macd_data)
-            
-            # ATR
-            indicators['atr'] = self._calculate_atr(data, 14)
-            
-            # Volume analysis
-            if 'tick_volume' in data.columns:
-                indicators['volume_sma'] = data['tick_volume'].rolling(20).mean().iloc[-1]
-                indicators['volume_ratio'] = data['tick_volume'].iloc[-1] / indicators['volume_sma'] if indicators['volume_sma'] > 0 else 1
-            
-            return indicators
+            return {
+                'avg_spread': sum(spreads) / len(spreads),
+                'min_spread': min(spreads),
+                'max_spread': max(spreads),
+                'current_spread': spreads[-1] if spreads else 0.0,
+                'spread_volatility': pd.Series(spreads).std() if len(spreads) > 1 else 0.0,
+                'sample_count': len(spreads)
+            }
             
         except Exception as e:
-            self.logger.error(f"Error calculating indicators for {symbol}: {e}")
+            log_error("DataManager", f"Error calculating spread statistics for {symbol}", e)
             return {}
     
-    def _calculate_rsi(self, prices: pd.Series, period: int = 14) -> float:
-        """Calculate RSI"""
+    def get_market_hours_info(self) -> Dict[str, Any]:
+        """Get market trading hours information"""
         try:
-            delta = prices.diff()
-            gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
-            loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
+            current_time = datetime.now()
             
-            rs = gain / loss
-            rsi = 100 - (100 / (1 + rs))
-            
-            return rsi.iloc[-1] if not rsi.empty else 50.0
-            
-        except Exception:
-            return 50.0
-    
-    def _calculate_bollinger_bands(self, prices: pd.Series, period: int = 20, std_dev: float = 2) -> Dict[str, float]:
-        """Calculate Bollinger Bands"""
-        try:
-            sma = prices.rolling(period).mean()
-            std = prices.rolling(period).std()
-            
-            upper_band = sma + (std * std_dev)
-            lower_band = sma - (std * std_dev)
-            
-            return {
-                'bb_upper': upper_band.iloc[-1] if not upper_band.empty else 0,
-                'bb_middle': sma.iloc[-1] if not sma.empty else 0,
-                'bb_lower': lower_band.iloc[-1] if not lower_band.empty else 0
+            # Simplified market hours (UTC)
+            market_sessions = {
+                'sydney': {'start': 21, 'end': 6},
+                'tokyo': {'start': 0, 'end': 9},
+                'london': {'start': 7, 'end': 16},
+                'new_york': {'start': 12, 'end': 21}
             }
             
-        except Exception:
-            return {'bb_upper': 0, 'bb_middle': 0, 'bb_lower': 0}
-    
-    def _calculate_macd(self, prices: pd.Series, fast: int = 12, slow: int = 26, signal: int = 9) -> Dict[str, float]:
-        """Calculate MACD"""
-        try:
-            ema_fast = prices.ewm(span=fast).mean()
-            ema_slow = prices.ewm(span=slow).mean()
+            current_hour = current_time.hour
+            active_sessions = []
             
-            macd_line = ema_fast - ema_slow
-            signal_line = macd_line.ewm(span=signal).mean()
-            histogram = macd_line - signal_line
+            for session, hours in market_sessions.items():
+                if hours['start'] <= current_hour < hours['end']:
+                    active_sessions.append(session)
+            
+            # Check if it's weekend
+            is_weekend = current_time.weekday() >= 5
             
             return {
-                'macd': macd_line.iloc[-1] if not macd_line.empty else 0,
-                'macd_signal': signal_line.iloc[-1] if not signal_line.empty else 0,
-                'macd_histogram': histogram.iloc[-1] if not histogram.empty else 0
-            }
-            
-        except Exception:
-            return {'macd': 0, 'macd_signal': 0, 'macd_histogram': 0}
-    
-    def _calculate_atr(self, data: pd.DataFrame, period: int = 14) -> float:
-        """Calculate Average True Range"""
-        try:
-            high_low = data['high'] - data['low']
-            high_close = np.abs(data['high'] - data['close'].shift())
-            low_close = np.abs(data['low'] - data['close'].shift())
-            
-            true_range = np.maximum(high_low, np.maximum(high_close, low_close))
-            atr = true_range.rolling(period).mean()
-            
-            return atr.iloc[-1] if not atr.empty else 0
-            
-        except Exception:
-            return 0
-    
-    def get_market_condition(self, symbol: str) -> Dict[str, Any]:
-        """Analyze market condition"""
-        try:
-            data = self.get_latest_data(symbol, 100)
-            if data.empty:
-                return {'condition': 'unknown', 'volatility': 'normal', 'trend': 'sideways'}
-            
-            # Calculate volatility
-            volatility = data['close'].pct_change().std() * 100
-            
-            # Determine volatility level
-            if volatility > 1.5:
-                vol_level = 'high'
-            elif volatility < 0.5:
-                vol_level = 'low'
-            else:
-                vol_level = 'normal'
-            
-            # Determine trend
-            sma_20 = data['close'].rolling(20).mean()
-            sma_50 = data['close'].rolling(50).mean()
-            
-            if len(sma_20) >= 2 and len(sma_50) >= 2:
-                if sma_20.iloc[-1] > sma_50.iloc[-1] and sma_20.iloc[-1] > sma_20.iloc[-2]:
-                    trend = 'uptrend'
-                elif sma_20.iloc[-1] < sma_50.iloc[-1] and sma_20.iloc[-1] < sma_20.iloc[-2]:
-                    trend = 'downtrend'
-                else:
-                    trend = 'sideways'
-            else:
-                trend = 'sideways'
-            
-            # Determine overall condition
-            if vol_level == 'high':
-                condition = 'volatile'
-            elif trend in ['uptrend', 'downtrend']:
-                condition = 'trending'
-            else:
-                condition = 'ranging'
-            
-            return {
-                'condition': condition,
-                'volatility': vol_level,
-                'trend': trend,
-                'volatility_value': volatility
+                'current_time': current_time,
+                'active_sessions': active_sessions,
+                'is_weekend': is_weekend,
+                'market_open': len(active_sessions) > 0 and not is_weekend,
+                'liquidity_level': 'HIGH' if len(active_sessions) >= 2 else 'MEDIUM' if active_sessions else 'LOW'
             }
             
         except Exception as e:
-            self.logger.error(f"Error analyzing market condition for {symbol}: {e}")
-            return {'condition': 'unknown', 'volatility': 'normal', 'trend': 'sideways'}
+            log_error("DataManager", "Error getting market hours info", e)
+            return {}
     
-    def get_data_status(self) -> Dict[str, Any]:
-        """Get data manager status"""
+    def get_symbol_activity(self, symbol: str, minutes: int = 30) -> Dict[str, Any]:
+        """Get symbol trading activity for the last N minutes"""
         try:
-            status = {
-                'running': self.running,
-                'symbols_count': len(self.data_cache),
-                'subscribers_count': sum(len(subs) for subs in self.subscribers.values()),
-                'last_updates': {}
+            cutoff_time = datetime.now() - timedelta(minutes=minutes)
+            recent_ticks = [
+                tick for tick in self.tick_data.get(symbol, [])
+                if tick['timestamp'] >= cutoff_time
+            ]
+            
+            if not recent_ticks:
+                return {}
+            
+            # Calculate price movements
+            prices = [(tick['bid'] + tick['ask']) / 2 for tick in recent_ticks]
+            
+            if len(prices) < 2:
+                return {}
+            
+            price_changes = [prices[i] - prices[i-1] for i in range(1, len(prices))]
+            
+            return {
+                'tick_count': len(recent_ticks),
+                'price_range': max(prices) - min(prices),
+                'avg_price': sum(prices) / len(prices),
+                'volatility': pd.Series(price_changes).std() if len(price_changes) > 1 else 0.0,
+                'trend': 'UP' if prices[-1] > prices[0] else 'DOWN' if prices[-1] < prices[0] else 'FLAT',
+                'activity_level': 'HIGH' if len(recent_ticks) > minutes * 10 else 'MEDIUM' if len(recent_ticks) > minutes * 5 else 'LOW'
             }
             
-            for symbol, cache_data in self.data_cache.items():
-                status['last_updates'][symbol] = cache_data['last_update']
+        except Exception as e:
+            log_error("DataManager", f"Error getting symbol activity for {symbol}", e)
+            return {}
+    
+    def export_data(self, symbol: str, format_type: str = 'csv') -> Optional[str]:
+        """Export symbol data to file"""
+        try:
+            historical_data = self.get_historical_data(symbol)
+            
+            if historical_data is None or len(historical_data) == 0:
+                self.logger.warning(f"No data to export for {symbol}")
+                return None
+            
+            filename = f"{symbol}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.{format_type}"
+            
+            if format_type.lower() == 'csv':
+                historical_data.to_csv(filename, index=False)
+            elif format_type.lower() == 'json':
+                historical_data.to_json(filename, orient='records', date_format='iso')
+            else:
+                self.logger.error(f"Unsupported export format: {format_type}")
+                return None
+            
+            self.logger.info(f"Data exported to {filename}")
+            return filename
+            
+        except Exception as e:
+            log_error("DataManager", f"Error exporting data for {symbol}", e)
+            return None
+    
+    def get_data_status(self) -> Dict[str, Any]:
+        """Get current data manager status"""
+        try:
+            status = {
+                'update_running': self.update_running,
+                'active_symbols': self.active_symbols,
+                'data_counts': {},
+                'last_updates': {},
+                'connection_status': self.mt5_connector.check_connection()
+            }
+            
+            for symbol in self.active_symbols:
+                # Data counts
+                status['data_counts'][symbol] = {
+                    'historical_bars': len(self.historical_data.get(symbol, [])),
+                    'tick_count': len(self.tick_data.get(symbol, []))
+                }
+                
+                # Last update times
+                live_data = self.live_data.get(symbol, {})
+                status['last_updates'][symbol] = live_data.get('last_update')
             
             return status
             
         except Exception as e:
-            self.logger.error(f"Error getting data status: {e}")
-            return {'running': False, 'symbols_count': 0, 'subscribers_count': 0}
+            log_error("DataManager", "Error getting data status", e)
+            return {}
+    
+    def refresh_symbol_data(self, symbol: str):
+        """Manually refresh data for a symbol"""
+        try:
+            # Reload historical data
+            rates = self.mt5_connector.get_rates(symbol, 1, 0, 500)
+            if rates is not None:
+                self.historical_data[symbol] = rates
+                self.logger.info(f"Refreshed historical data for {symbol}: {len(rates)} bars")
+            
+            # Update live data
+            self._update_symbol_data(symbol)
+            
+        except Exception as e:
+            log_error("DataManager", f"Error refreshing data for {symbol}", e)
