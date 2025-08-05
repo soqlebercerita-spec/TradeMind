@@ -336,3 +336,94 @@ class TechnicalAnalysis:
         except Exception as e:
             self.logger.error(f"Error calculating WMA: {e}")
             return pd.Series(index=prices.index, dtype=float)
+"""
+Technical Analysis Module for AuraTrade
+Comprehensive technical indicators and analysis
+"""
+
+import pandas as pd
+import numpy as np
+from typing import Dict, Any, Optional
+
+class TechnicalAnalysis:
+    """Technical analysis indicators and calculations"""
+    
+    def __init__(self):
+        pass
+    
+    def calculate_all_indicators(self, data: pd.DataFrame) -> pd.DataFrame:
+        """Calculate all technical indicators for the dataset"""
+        try:
+            if len(data) < 50:
+                return data
+            
+            # Moving Averages
+            data['sma_20'] = data['close'].rolling(window=20).mean()
+            data['sma_50'] = data['close'].rolling(window=50).mean()
+            data['ema_12'] = data['close'].ewm(span=12).mean()
+            data['ema_26'] = data['close'].ewm(span=26).mean()
+            
+            # RSI
+            data['rsi'] = self._calculate_rsi(data['close'], 14)
+            
+            # MACD
+            data['macd'] = data['ema_12'] - data['ema_26']
+            data['macd_signal'] = data['macd'].ewm(span=9).mean()
+            data['macd_histogram'] = data['macd'] - data['macd_signal']
+            
+            # Bollinger Bands
+            bb_period = 20
+            bb_std = 2
+            data['bb_middle'] = data['close'].rolling(window=bb_period).mean()
+            bb_std_dev = data['close'].rolling(window=bb_period).std()
+            data['bb_upper'] = data['bb_middle'] + (bb_std_dev * bb_std)
+            data['bb_lower'] = data['bb_middle'] - (bb_std_dev * bb_std)
+            
+            # ATR
+            data['atr'] = self._calculate_atr(data, 14)
+            
+            # Stochastic
+            stoch_k, stoch_d = self._calculate_stochastic(data, 14, 3)
+            data['stoch_k'] = stoch_k
+            data['stoch_d'] = stoch_d
+            
+            return data
+            
+        except Exception as e:
+            return data
+    
+    def _calculate_rsi(self, prices: pd.Series, period: int = 14) -> pd.Series:
+        """Calculate RSI indicator"""
+        try:
+            delta = prices.diff()
+            gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
+            loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
+            rs = gain / loss
+            rsi = 100 - (100 / (1 + rs))
+            return rsi
+        except:
+            return pd.Series(index=prices.index, dtype=float)
+    
+    def _calculate_atr(self, data: pd.DataFrame, period: int = 14) -> pd.Series:
+        """Calculate Average True Range"""
+        try:
+            tr1 = data['high'] - data['low']
+            tr2 = abs(data['high'] - data['close'].shift())
+            tr3 = abs(data['low'] - data['close'].shift())
+            tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+            atr = tr.rolling(window=period).mean()
+            return atr
+        except:
+            return pd.Series(index=data.index, dtype=float)
+    
+    def _calculate_stochastic(self, data: pd.DataFrame, k_period: int = 14, 
+                            d_period: int = 3) -> tuple:
+        """Calculate Stochastic Oscillator"""
+        try:
+            lowest_low = data['low'].rolling(window=k_period).min()
+            highest_high = data['high'].rolling(window=k_period).max()
+            k_percent = 100 * ((data['close'] - lowest_low) / (highest_high - lowest_low))
+            d_percent = k_percent.rolling(window=d_period).mean()
+            return k_percent, d_percent
+        except:
+            return pd.Series(index=data.index, dtype=float), pd.Series(index=data.index, dtype=float)

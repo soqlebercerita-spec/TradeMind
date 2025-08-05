@@ -144,3 +144,69 @@ class ScalpingStrategy:
                 'rsi_overbought': self.rsi_overbought
             }
         }
+"""
+Scalping Strategy for AuraTrade
+Quick profit scalping with high accuracy
+"""
+
+import pandas as pd
+from typing import Dict, Any, Optional
+from datetime import datetime
+
+class ScalpingStrategy:
+    """Scalping Strategy for quick profits"""
+    
+    def __init__(self):
+        self.enabled = True
+        self.name = "Scalping"
+        self.min_confidence = 70
+        
+    def analyze_signal(self, symbol: str, data: pd.DataFrame, 
+                      current_price: tuple, market_condition: Dict) -> Optional[Dict[str, Any]]:
+        """Analyze scalping signals"""
+        try:
+            if len(data) < 50:
+                return None
+                
+            latest = data.iloc[-1]
+            bid, ask = current_price
+            
+            # EMA crossover
+            ema_12 = latest.get('ema_12', 0)
+            ema_26 = latest.get('ema_26', 0)
+            
+            # Bollinger Bands
+            bb_upper = latest.get('bb_upper', 0)
+            bb_lower = latest.get('bb_lower', 0)
+            bb_middle = latest.get('bb_middle', 0)
+            
+            signal = None
+            confidence = 0
+            
+            # Buy at lower band with EMA support
+            if (latest['close'] <= bb_lower and ema_12 > ema_26 and 
+                market_condition.get('trend') != 'bearish'):
+                signal = 'buy'
+                confidence = 75
+                
+            # Sell at upper band with EMA resistance
+            elif (latest['close'] >= bb_upper and ema_12 < ema_26 and 
+                  market_condition.get('trend') != 'bullish'):
+                signal = 'sell'
+                confidence = 75
+                
+            if signal and confidence >= self.min_confidence:
+                return {
+                    'signal': signal,
+                    'entry_price': ask if signal == 'buy' else bid,
+                    'confidence': confidence,
+                    'strategy': self.name,
+                    'stop_loss_pips': 2.0,
+                    'take_profit_pips': 4.0,
+                    'risk_percent': 1.0
+                }
+                
+            return None
+            
+        except Exception as e:
+            return None

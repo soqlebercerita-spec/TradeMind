@@ -8,6 +8,7 @@ import sys
 import os
 import time
 import threading
+import signal # Import signal module for graceful shutdown
 from datetime import datetime
 from typing import Dict, List
 import MetaTrader5 as mt5

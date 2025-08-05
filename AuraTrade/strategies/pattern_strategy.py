@@ -271,3 +271,69 @@ class PatternStrategy:
                 'hammer_ratio': self.hammer_ratio
             }
         }
+"""
+Pattern Recognition Strategy for AuraTrade
+Advanced pattern detection with high win rate
+"""
+
+import pandas as pd
+from typing import Dict, Any, Optional
+from datetime import datetime
+
+class PatternStrategy:
+    """Pattern Recognition Strategy"""
+    
+    def __init__(self):
+        self.enabled = True
+        self.name = "Pattern"
+        self.min_confidence = 65
+        
+    def analyze_signal(self, symbol: str, data: pd.DataFrame, 
+                      current_price: tuple, market_condition: Dict) -> Optional[Dict[str, Any]]:
+        """Analyze pattern-based signals"""
+        try:
+            if len(data) < 100:
+                return None
+                
+            latest = data.iloc[-1]
+            bid, ask = current_price
+            
+            # MACD signals
+            macd = latest.get('macd', 0)
+            macd_signal = latest.get('macd_signal', 0)
+            macd_histogram = latest.get('macd_histogram', 0)
+            
+            # Stochastic
+            stoch_k = latest.get('stoch_k', 50)
+            stoch_d = latest.get('stoch_d', 50)
+            
+            signal = None
+            confidence = 0
+            
+            # Bullish divergence
+            if (macd > macd_signal and macd_histogram > 0 and 
+                stoch_k < 20 and stoch_k > stoch_d):
+                signal = 'buy'
+                confidence = 70
+                
+            # Bearish divergence
+            elif (macd < macd_signal and macd_histogram < 0 and 
+                  stoch_k > 80 and stoch_k < stoch_d):
+                signal = 'sell'
+                confidence = 70
+                
+            if signal and confidence >= self.min_confidence:
+                return {
+                    'signal': signal,
+                    'entry_price': ask if signal == 'buy' else bid,
+                    'confidence': confidence,
+                    'strategy': self.name,
+                    'stop_loss_pips': 3.0,
+                    'take_profit_pips': 6.0,
+                    'risk_percent': 1.5
+                }
+                
+            return None
+            
+        except Exception as e:
+            return None
