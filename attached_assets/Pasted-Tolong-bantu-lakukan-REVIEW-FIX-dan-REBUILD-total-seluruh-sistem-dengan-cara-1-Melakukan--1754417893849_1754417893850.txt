@@ -1,0 +1,95 @@
+Tolong bantu lakukan **REVIEW, FIX, dan REBUILD** total seluruh sistem dengan cara:
+
+1. Melakukan 15x validasi internal ke seluruh modul, class, dan file.
+2. Memastikan semua fitur wajib berfungsi 100% tanpa error.
+3. Hapus semua file/module yang tidak digunakan.
+4. Cek semua import, dependency, dan koneksi antar modul secara menyeluruh.
+5. Perbaiki semua error log (terutama Unicode dan attribute error).
+6. Rebuild GUI agar tampil profesional dan tidak berantakan di Windows.
+7. Pastikan MT5 bisa terkoneksi otomatis tanpa user intervensi.
+8. Semua indikator teknikal harus dibuat manual (tanpa TA-Lib).
+
+---
+
+### 📂 STRUKTUR FOLDER YANG DIGUNAKAN
+
+AuraTrade/
+├── bot.py # Main entry point
+├── core/
+│ ├── mt5_connector.py
+│ ├── trading_engine.py
+│ ├── order_manager.py
+│ └── portfolio.py
+├── strategies/
+│ ├── hft_strategy.py
+│ ├── scalping_strategy.py
+│ ├── swing_strategy.py
+│ └── arbitrage_strategy.py
+├── risk/
+│ ├── risk_manager.py
+│ └── position_sizer.py
+├── utils/
+│ ├── notifier.py
+│ ├── logger.py
+│ └── helpers.py
+├── gui/
+│ └── main_window.py
+├── analytics/
+│ ├── technical_analysis.py
+│ ├── pattern_detector.py
+│ └── sentiment_analyzer.py
+├── config/
+│ ├── config.py
+│ ├── settings.py
+│ └── credentials.py
+├── logs/
+│ └── *.log
+
+markdown
+Copy
+Edit
+
+---
+
+### 🎯 GOAL UTAMA (KETIKA DIJALANKAN `python bot.py`):
+
+- [ ] Auto-connect dan auto-reconnect ke MT5
+- [ ] Load semua strategi: HFT, scalping, swing, arbitrage
+- [ ] Jalankan auto trading real-time di MT5
+- [ ] TP/SL ditentukan dari persentase balance, bukan pip
+- [ ] Logger support UTF-8 (tidak error karena emoji di Windows)
+- [ ] GUI tampil profesional dan real-time (bisa minimize/system tray)
+- [ ] Telegram notification aktif (open/close, alert, drawdown)
+- [ ] Koneksi simbol multi-asset (multi-symbol trading)
+- [ ] Risk Management adaptif: Max DD, Exposure limit, auto stop
+- [ ] Jika MT5 disconnect → reconnect otomatis
+- [ ] Jika error kritis → auto log dan shutdown aman
+
+---
+
+### 🧠 FITUR WAJIB AKTIF (CEKLIST):
+
+- [x] MT5 auto login + auto reconnect
+- [x] TP/SL dari % modal
+- [x] Trailing stop aktif
+- [x] Pattern detector (Engulfing, Double Top, dst)
+- [x] NLP sentiment analyzer (opsional)
+- [x] Technical indicators (SMA, EMA, RSI, BB, MACD, WMA, ATR, Volume) — *tanpa TA-Lib*
+- [x] Risk manager adaptif + auto lot sizing
+- [x] Telegram alert
+- [x] GUI real-time status
+- [x] Logger support UTF-8 (emoji-friendly)
+- [x] Semua class wajib punya logger
+- [x] Tidak boleh ada `AttributeError`, `ImportError`, `NoneType`, atau UnicodeEncodeError
+- [x] Semua class/method digunakan — tidak ada kode mati
+- [x] Jalankan 24/7 tanpa crash (loop stabil + error handling lengkap)
+
+---
+
+### 🧼 PERINTAH TERAKHIR
+
+> 🔁 Lakukan 15x validasi internal.
+> 🧹 Hapus file tidak terpakai.
+> 🔧 Rebuild total seluruh project jika perlu agar stabil.
+> 💯 Berikan **semua file dalam satu batch**, bukan potongan.
+> 🎁 Pastikan hasil akhir siap langsung dijalankan tanpa error: `python bot.py`
