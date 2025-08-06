@@ -1,336 +1,380 @@
 
 """
 High-Frequency Trading Strategy for AuraTrade Bot
-Scalping-based strategy targeting quick profits with high win rate
+Ultra-fast execution based on tick data and micro-movements
 """
 
-import numpy as np
 import pandas as pd
+import numpy as np
+from typing import Dict, Any, Optional, List
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Any
+import time
 from utils.logger import Logger
 
 class HFTStrategy:
-    """High-Frequency Trading strategy for quick scalping profits"""
+    """High-Frequency Trading strategy for sub-second opportunities"""
     
     def __init__(self):
         self.logger = Logger().get_logger()
-        self.name = "HFT_Scalper"
+        self.name = "HFT"
         
-        # Strategy parameters optimized for high win rate
+        # HFT Parameters (very aggressive)
         self.params = {
-            'min_spread': 2,           # Minimum spread in pips
-            'max_spread': 10,          # Maximum spread in pips  
-            'scalp_target': 5,         # Target profit in pips
-            'stop_loss': 3,            # Stop loss in pips
-            'rsi_oversold': 25,        # RSI oversold level
-            'rsi_overbought': 75,      # RSI overbought level
+            'timeframe': 'TICK',  # Tick-based trading
+            'min_confidence': 0.7,  # High confidence required
+            'max_positions': 2,     # Limited concurrent positions
+            'profit_target_pips': 3,   # Very small profit target
+            'stop_loss_pips': 5,       # Tight stop loss
+            'max_holding_time': 1,     # Max 1 minute holding
+            'min_tick_movement': 0.5,  # Minimum pip movement to trigger
+            'spread_limit': 1.0,       # Very tight spread requirement
             'volume_threshold': 1.5,   # Volume spike threshold
-            'momentum_period': 5,      # Momentum calculation period
-            'min_confidence': 0.75,    # Minimum confidence for trade
         }
         
-        # Internal state
-        self.last_signals = {}
-        self.signal_count = 0
+        # Tick data storage
+        self.tick_history = {}
+        self.price_momentum = {}
+        self.last_execution = {}
         
-        self.logger.info(f"HFT Strategy initialized - Target: Quick scalps with 85%+ win rate")
+        self.logger.info("HFT strategy initialized for ultra-fast execution")
     
-    def analyze(self, symbol: str, rates: pd.DataFrame, tick: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        """Analyze market conditions for HFT opportunities"""
+    def analyze(self, symbol: str, rates: pd.DataFrame, tick: Dict) -> Optional[Dict[str, Any]]:
+        """High-frequency analysis based on tick movements"""
         try:
-            if len(rates) < 20:
+            # Check if suitable for HFT
+            if not self._is_hft_suitable(symbol, tick):
                 return None
             
-            # Current market conditions
-            current_bid = tick['bid']
-            current_ask = tick['ask']
-            spread = (current_ask - current_bid) * 100000  # Convert to pips
+            # Store tick data
+            self._store_tick_data(symbol, tick)
             
-            # Check spread conditions
-            if not self._check_spread_conditions(spread):
+            # Quick spread check
+            if self._check_spread(symbol, tick):
                 return None
             
-            # Calculate technical indicators
-            indicators = self._calculate_indicators(rates)
-            if not indicators:
-                return None
+            # Analyze micro-movements
+            signal = self._analyze_micro_movements(symbol, tick)
             
-            # Generate trading signal
-            signal = self._generate_signal(symbol, indicators, tick, spread)
-            
-            if signal:
-                self.signal_count += 1
-                self.last_signals[symbol] = {
-                    'signal': signal,
-                    'timestamp': datetime.now()
-                }
+            if signal and signal.get('confidence', 0) >= self.params['min_confidence']:
+                # Add HFT-specific parameters
+                signal.update({
+                    'strategy': self.name,
+                    'execution_priority': 'IMMEDIATE',
+                    'stop_loss_pips': self.params['stop_loss_pips'],
+                    'take_profit_pips': self.params['profit_target_pips']
+                })
                 
-                self.logger.info(f"HFT signal generated for {symbol}: {signal['action']} (Confidence: {signal['confidence']:.2f})")
+                return signal
             
-            return signal
+            return None
             
         except Exception as e:
             self.logger.error(f"Error in HFT analysis for {symbol}: {e}")
             return None
     
-    def _check_spread_conditions(self, spread_pips: float) -> bool:
-        """Check if spread conditions are favorable for scalping"""
-        return self.params['min_spread'] <= spread_pips <= self.params['max_spread']
-    
-    def _calculate_indicators(self, rates: pd.DataFrame) -> Optional[Dict[str, float]]:
-        """Calculate technical indicators for HFT"""
+    def _is_hft_suitable(self, symbol: str, tick: Dict) -> bool:
+        """Check if current conditions are suitable for HFT"""
         try:
-            # Ensure we have enough data
-            if len(rates) < 20:
+            # Check last execution time (avoid over-trading)
+            current_time = time.time()
+            if symbol in self.last_execution:
+                if current_time - self.last_execution[symbol] < 5:  # 5 seconds cooldown
+                    return False
+            
+            # Check market hours (avoid low liquidity periods)
+            now = datetime.now()
+            hour = now.hour
+            
+            # Only trade during high liquidity hours
+            if hour < 6 or hour > 21:  # Avoid Asian/late US sessions
+                return False
+            
+            # Check if it's a major currency pair (better for HFT)
+            major_pairs = ['EURUSD', 'GBPUSD', 'USDJPY', 'USDCHF', 'AUDUSD', 'USDCAD']
+            if symbol not in major_pairs and 'XAU' not in symbol:
+                return False
+            
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"Error checking HFT suitability: {e}")
+            return False
+    
+    def _store_tick_data(self, symbol: str, tick: Dict):
+        """Store recent tick data for analysis"""
+        try:
+            current_time = time.time()
+            
+            if symbol not in self.tick_history:
+                self.tick_history[symbol] = []
+            
+            # Store tick with timestamp
+            tick_data = {
+                'timestamp': current_time,
+                'bid': tick.get('bid', 0),
+                'ask': tick.get('ask', 0),
+                'spread': tick.get('ask', 0) - tick.get('bid', 0)
+            }
+            
+            self.tick_history[symbol].append(tick_data)
+            
+            # Keep only last 50 ticks (about 5 seconds worth)
+            if len(self.tick_history[symbol]) > 50:
+                self.tick_history[symbol] = self.tick_history[symbol][-50:]
+            
+        except Exception as e:
+            self.logger.error(f"Error storing tick data: {e}")
+    
+    def _analyze_micro_movements(self, symbol: str, tick: Dict) -> Optional[Dict[str, Any]]:
+        """Analyze micro price movements for HFT opportunities"""
+        try:
+            if symbol not in self.tick_history or len(self.tick_history[symbol]) < 10:
                 return None
             
-            close_prices = rates['close'].values
-            high_prices = rates['high'].values
-            low_prices = rates['low'].values
-            volumes = rates['tick_volume'].values
+            tick_data = self.tick_history[symbol]
             
-            # RSI calculation
-            rsi = self._calculate_rsi(close_prices, 14)
+            # Calculate momentum indicators
+            momentum_signal = self._calculate_tick_momentum(tick_data)
             
-            # Price momentum (rate of change)
-            momentum = self._calculate_momentum(close_prices, self.params['momentum_period'])
+            # Calculate price acceleration
+            acceleration = self._calculate_price_acceleration(tick_data)
             
-            # Volume analysis
-            volume_avg = np.mean(volumes[-10:])
-            current_volume = volumes[-1]
-            volume_ratio = current_volume / volume_avg if volume_avg > 0 else 1.0
+            # Volume/spread analysis
+            spread_signal = self._analyze_spread_pattern(tick_data)
             
-            # Volatility (ATR-like)
-            volatility = self._calculate_volatility(high_prices, low_prices, close_prices)
+            # Combine micro-signals
+            signal = self._combine_hft_signals(momentum_signal, acceleration, spread_signal)
             
-            # Price action patterns
-            price_pattern = self._analyze_price_action(close_prices[-5:])
+            if signal:
+                # Add timing constraint
+                signal['max_execution_delay'] = 0.1  # 100ms max delay
+                signal['time_sensitive'] = True
+                
+                self.last_execution[symbol] = time.time()
             
-            # Micro-trend analysis
-            micro_trend = self._calculate_micro_trend(close_prices[-10:])
+            return signal
+            
+        except Exception as e:
+            self.logger.error(f"Error analyzing micro movements: {e}")
+            return None
+    
+    def _calculate_tick_momentum(self, tick_data: List[Dict]) -> Dict[str, Any]:
+        """Calculate momentum from recent ticks"""
+        try:
+            if len(tick_data) < 5:
+                return {'direction': 'NEUTRAL', 'strength': 0}
+            
+            # Get recent bid prices
+            recent_bids = [t['bid'] for t in tick_data[-10:]]
+            
+            # Calculate directional momentum
+            price_changes = np.diff(recent_bids)
+            
+            # Count directional moves
+            up_moves = np.sum(price_changes > 0)
+            down_moves = np.sum(price_changes < 0)
+            
+            # Calculate momentum strength
+            avg_change = np.mean(np.abs(price_changes))
+            total_range = max(recent_bids) - min(recent_bids)
+            
+            if total_range > 0:
+                momentum_strength = (avg_change / total_range) * 100
+            else:
+                momentum_strength = 0
+            
+            # Determine direction
+            if up_moves > down_moves * 1.5:
+                direction = 'BULLISH'
+                strength = momentum_strength * (up_moves / len(price_changes))
+            elif down_moves > up_moves * 1.5:
+                direction = 'BEARISH'  
+                strength = momentum_strength * (down_moves / len(price_changes))
+            else:
+                direction = 'NEUTRAL'
+                strength = 0
             
             return {
-                'rsi': rsi,
-                'momentum': momentum,
-                'volume_ratio': volume_ratio,
-                'volatility': volatility,
-                'price_pattern': price_pattern,
-                'micro_trend': micro_trend,
-                'current_price': close_prices[-1]
+                'direction': direction,
+                'strength': min(strength, 100),
+                'consistency': max(up_moves, down_moves) / len(price_changes)
             }
             
         except Exception as e:
-            self.logger.error(f"Error calculating HFT indicators: {e}")
-            return None
+            self.logger.error(f"Error calculating tick momentum: {e}")
+            return {'direction': 'NEUTRAL', 'strength': 0}
     
-    def _calculate_rsi(self, prices: np.ndarray, period: int = 14) -> float:
-        """Calculate RSI indicator"""
+    def _calculate_price_acceleration(self, tick_data: List[Dict]) -> float:
+        """Calculate price acceleration (change in momentum)"""
         try:
-            if len(prices) < period + 1:
-                return 50.0  # Neutral RSI
+            if len(tick_data) < 6:
+                return 0
             
-            deltas = np.diff(prices)
-            gains = np.where(deltas > 0, deltas, 0)
-            losses = np.where(deltas < 0, -deltas, 0)
+            prices = [t['bid'] for t in tick_data[-6:]]
             
-            avg_gain = np.mean(gains[-period:])
-            avg_loss = np.mean(losses[-period:])
+            # Calculate first and second derivatives
+            first_diff = np.diff(prices)
+            second_diff = np.diff(first_diff)
             
-            if avg_loss == 0:
-                return 100.0
+            # Acceleration is the average of second derivatives
+            acceleration = np.mean(second_diff) if len(second_diff) > 0 else 0
             
-            rs = avg_gain / avg_loss
-            rsi = 100 - (100 / (1 + rs))
-            
-            return rsi
-            
-        except Exception:
-            return 50.0
-    
-    def _calculate_momentum(self, prices: np.ndarray, period: int) -> float:
-        """Calculate price momentum"""
-        try:
-            if len(prices) < period + 1:
-                return 0.0
-            
-            current_price = prices[-1]
-            past_price = prices[-period-1]
-            
-            momentum = (current_price - past_price) / past_price * 100
-            return momentum
-            
-        except Exception:
-            return 0.0
-    
-    def _calculate_volatility(self, highs: np.ndarray, lows: np.ndarray, closes: np.ndarray) -> float:
-        """Calculate volatility (ATR-like)"""
-        try:
-            if len(highs) < 10:
-                return 0.0
-            
-            true_ranges = []
-            for i in range(1, len(highs)):
-                tr1 = highs[i] - lows[i]
-                tr2 = abs(highs[i] - closes[i-1])
-                tr3 = abs(lows[i] - closes[i-1])
-                true_ranges.append(max(tr1, tr2, tr3))
-            
-            volatility = np.mean(true_ranges[-10:]) if true_ranges else 0.0
-            return volatility
-            
-        except Exception:
-            return 0.0
-    
-    def _analyze_price_action(self, recent_prices: np.ndarray) -> str:
-        """Analyze recent price action patterns"""
-        try:
-            if len(recent_prices) < 3:
-                return "NEUTRAL"
-            
-            # Simple trend analysis
-            trend_up = all(recent_prices[i] >= recent_prices[i-1] for i in range(1, len(recent_prices)))
-            trend_down = all(recent_prices[i] <= recent_prices[i-1] for i in range(1, len(recent_prices)))
-            
-            if trend_up:
-                return "BULLISH"
-            elif trend_down:
-                return "BEARISH"
-            else:
-                return "NEUTRAL"
-                
-        except Exception:
-            return "NEUTRAL"
-    
-    def _calculate_micro_trend(self, prices: np.ndarray) -> float:
-        """Calculate micro-trend strength"""
-        try:
-            if len(prices) < 5:
-                return 0.0
-            
-            # Linear regression slope
-            x = np.arange(len(prices))
-            slope = np.polyfit(x, prices, 1)[0]
-            
-            # Normalize slope
+            # Normalize acceleration
             price_range = max(prices) - min(prices)
-            normalized_slope = slope / price_range if price_range > 0 else 0.0
+            if price_range > 0:
+                normalized_acceleration = (acceleration / price_range) * 10000
+            else:
+                normalized_acceleration = 0
             
-            return normalized_slope * 1000  # Scale for easier interpretation
+            return normalized_acceleration
             
-        except Exception:
-            return 0.0
+        except Exception as e:
+            self.logger.error(f"Error calculating acceleration: {e}")
+            return 0
     
-    def _generate_signal(self, symbol: str, indicators: Dict[str, float], 
-                        tick: Dict[str, Any], spread_pips: float) -> Optional[Dict[str, Any]]:
-        """Generate HFT trading signal"""
+    def _analyze_spread_pattern(self, tick_data: List[Dict]) -> Dict[str, Any]:
+        """Analyze spread patterns for HFT opportunities"""
         try:
-            rsi = indicators['rsi']
-            momentum = indicators['momentum']
-            volume_ratio = indicators['volume_ratio']
-            volatility = indicators['volatility']
-            price_pattern = indicators['price_pattern']
-            micro_trend = indicators['micro_trend']
+            if len(tick_data) < 5:
+                return {'signal': 'NEUTRAL', 'strength': 0}
             
-            # Signal scoring system
-            buy_score = 0
-            sell_score = 0
+            spreads = [t['spread'] for t in tick_data[-10:]]
             
-            # RSI signals
-            if rsi < self.params['rsi_oversold']:
-                buy_score += 2
-            elif rsi > self.params['rsi_overbought']:
-                sell_score += 2
+            current_spread = spreads[-1]
+            avg_spread = np.mean(spreads[:-1])
             
-            # Momentum signals
-            if momentum > 0.1:
-                buy_score += 1
-            elif momentum < -0.1:
-                sell_score += 1
+            # Look for spread compression (better execution opportunity)
+            if current_spread < avg_spread * 0.8:
+                return {'signal': 'TIGHT_SPREAD', 'strength': 20}
             
-            # Volume confirmation
-            if volume_ratio > self.params['volume_threshold']:
-                if micro_trend > 0:
-                    buy_score += 1
-                elif micro_trend < 0:
-                    sell_score += 1
+            # Look for spread widening (market uncertainty)
+            elif current_spread > avg_spread * 1.5:
+                return {'signal': 'WIDE_SPREAD', 'strength': -30}
             
-            # Price pattern confirmation
-            if price_pattern == "BULLISH":
-                buy_score += 1
-            elif price_pattern == "BEARISH":
-                sell_score += 1
+            return {'signal': 'NEUTRAL', 'strength': 0}
             
-            # Micro-trend signals
-            if micro_trend > 0.5:
-                buy_score += 1
-            elif micro_trend < -0.5:
-                sell_score += 1
+        except Exception as e:
+            self.logger.error(f"Error analyzing spread pattern: {e}")
+            return {'signal': 'NEUTRAL', 'strength': 0}
+    
+    def _combine_hft_signals(self, momentum: Dict, acceleration: float, spread: Dict) -> Optional[Dict[str, Any]]:
+        """Combine all HFT signals for final decision"""
+        try:
+            confidence = 0
+            action = None
+            reasoning = []
             
-            # Volatility filter (prefer moderate volatility)
-            if 0.0001 < volatility < 0.001:  # Optimal volatility range
-                buy_score += 0.5
-                sell_score += 0.5
+            # Momentum contribution
+            momentum_dir = momentum.get('direction', 'NEUTRAL')
+            momentum_strength = momentum.get('strength', 0)
+            consistency = momentum.get('consistency', 0)
             
-            # Determine signal
-            total_possible_score = 6.5
+            if momentum_dir != 'NEUTRAL' and momentum_strength > 30:
+                confidence += momentum_strength * 0.4
+                action = 'BUY' if momentum_dir == 'BULLISH' else 'SELL'
+                reasoning.append(f"Strong {momentum_dir.lower()} momentum")
+                
+                # Bonus for consistency
+                if consistency > 0.7:
+                    confidence += 15
+                    reasoning.append("Consistent directional movement")
             
-            if buy_score > sell_score and buy_score >= 4:
-                confidence = min(buy_score / total_possible_score, 0.95)
-                if confidence >= self.params['min_confidence']:
-                    return {
-                        'action': 'BUY',
-                        'confidence': confidence,
-                        'stop_loss_pips': self.params['stop_loss'],
-                        'take_profit_pips': self.params['scalp_target'],
-                        'signal_strength': buy_score,
-                        'indicators': indicators,
-                        'spread_pips': spread_pips,
-                        'strategy': self.name,
-                        'timestamp': datetime.now()
-                    }
+            # Acceleration contribution
+            if abs(acceleration) > 2:  # Significant acceleration
+                if action == 'BUY' and acceleration > 0:
+                    confidence += 20
+                    reasoning.append("Positive acceleration")
+                elif action == 'SELL' and acceleration < 0:
+                    confidence += 20
+                    reasoning.append("Negative acceleration")
+                elif action is None:
+                    # Acceleration-only signal
+                    action = 'BUY' if acceleration > 0 else 'SELL'
+                    confidence += 15
+                    reasoning.append("Price acceleration detected")
             
-            elif sell_score > buy_score and sell_score >= 4:
-                confidence = min(sell_score / total_possible_score, 0.95)
-                if confidence >= self.params['min_confidence']:
-                    return {
-                        'action': 'SELL',
-                        'confidence': confidence,
-                        'stop_loss_pips': self.params['stop_loss'],
-                        'take_profit_pips': self.params['scalp_target'],
-                        'signal_strength': sell_score,
-                        'indicators': indicators,
-                        'spread_pips': spread_pips,
-                        'strategy': self.name,
-                        'timestamp': datetime.now()
-                    }
+            # Spread contribution
+            spread_signal = spread.get('signal', 'NEUTRAL')
+            spread_strength = spread.get('strength', 0)
+            
+            if spread_signal == 'TIGHT_SPREAD' and action:
+                confidence += spread_strength
+                reasoning.append("Favorable spread conditions")
+            elif spread_signal == 'WIDE_SPREAD':
+                confidence -= abs(spread_strength)
+                reasoning.append("Wide spread reduces confidence")
+            
+            # Minimum confidence and action required
+            if action and confidence >= 60:
+                final_confidence = min(confidence / 100.0, 0.95)  # Cap at 95%
+                
+                return {
+                    'action': action,
+                    'confidence': final_confidence,
+                    'reasoning': '; '.join(reasoning),
+                    'execution_type': 'MARKET_IMMEDIATE',
+                    'momentum_strength': momentum_strength,
+                    'acceleration': acceleration
+                }
             
             return None
             
         except Exception as e:
-            self.logger.error(f"Error generating HFT signal: {e}")
+            self.logger.error(f"Error combining HFT signals: {e}")
             return None
     
+    def _check_spread(self, symbol: str, tick: Dict) -> bool:
+        """Check if spread is too wide for HFT"""
+        try:
+            spread = tick.get('ask', 0) - tick.get('bid', 0)
+            
+            # Convert to pips
+            if 'JPY' in symbol:
+                spread_pips = spread * 100
+            else:
+                spread_pips = spread * 10000
+            
+            return spread_pips > self.params['spread_limit']
+            
+        except:
+            return True  # If can't calculate, assume too wide
+    
     def get_strategy_info(self) -> Dict[str, Any]:
-        """Get strategy information"""
+        """Get HFT strategy information"""
         return {
             'name': self.name,
-            'type': 'High-Frequency Scalping',
-            'parameters': self.params,
-            'signals_generated': self.signal_count,
-            'last_signals': self.last_signals,
-            'target_win_rate': '85%+',
-            'avg_trade_duration': '1-5 minutes',
-            'risk_reward_ratio': f"1:{self.params['scalp_target']/self.params['stop_loss']:.1f}"
+            'type': 'High-Frequency Trading',
+            'timeframe': 'Tick/Sub-second',
+            'description': 'Ultra-fast execution based on micro price movements',
+            'risk_level': 'High',
+            'avg_trade_duration': '10-60 seconds',
+            'profit_target': f"{self.params['profit_target_pips']} pips",
+            'stop_loss': f"{self.params['stop_loss_pips']} pips",
+            'execution_speed': 'Sub-second'
         }
     
-    def update_parameters(self, new_params: Dict[str, Any]):
-        """Update strategy parameters"""
-        self.params.update(new_params)
-        self.logger.info(f"HFT strategy parameters updated: {new_params}")
+    def reset_tick_history(self, symbol: str):
+        """Reset tick history for symbol (useful for testing)"""
+        if symbol in self.tick_history:
+            del self.tick_history[symbol]
     
-    def reset_statistics(self):
-        """Reset strategy statistics"""
-        self.signal_count = 0
-        self.last_signals = {}
-        self.logger.info("HFT strategy statistics reset")
+    def get_tick_statistics(self, symbol: str) -> Dict[str, Any]:
+        """Get tick statistics for monitoring"""
+        try:
+            if symbol not in self.tick_history or not self.tick_history[symbol]:
+                return {}
+            
+            tick_data = self.tick_history[symbol]
+            spreads = [t['spread'] for t in tick_data]
+            
+            return {
+                'tick_count': len(tick_data),
+                'avg_spread': np.mean(spreads),
+                'min_spread': min(spreads),
+                'max_spread': max(spreads),
+                'last_update': tick_data[-1]['timestamp'] if tick_data else 0
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Error getting tick statistics: {e}")
+            return {}

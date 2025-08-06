@@ -1,407 +1,452 @@
 
 """
 Technical Analysis Module for AuraTrade Bot
-Comprehensive technical indicators and analysis tools
+Implements all required technical indicators without TA-Lib
 """
 
-import numpy as np
 import pandas as pd
-from typing import Dict, List, Tuple, Optional, Any
+import numpy as np
+from typing import Dict, List, Optional, Any, Tuple
 from datetime import datetime, timedelta
-import talib
-from utils.logger import Logger, log_info, log_error
+from utils.logger import Logger
 
 class TechnicalAnalysis:
-    """Advanced technical analysis engine"""
+    """Complete technical analysis system without TA-Lib dependency"""
     
     def __init__(self):
         self.logger = Logger().get_logger()
-        self.cache = {}
-        self.cache_timeout = 60  # seconds
-        
-    def analyze_symbol(self, symbol: str, data: pd.DataFrame) -> Dict[str, Any]:
-        """Comprehensive technical analysis for a symbol"""
+        self.logger.info("Technical Analysis module initialized")
+    
+    def analyze_trends(self, df: pd.DataFrame) -> Dict[str, Any]:
+        """Complete trend analysis with all indicators"""
         try:
-            if data.empty or len(data) < 50:
-                return {}
-                
+            if df is None or len(df) < 50:
+                return self._get_default_analysis()
+            
+            # Calculate all indicators
             analysis = {
-                'symbol': symbol,
-                'timestamp': datetime.now(),
-                'trend': self.analyze_trend(data),
-                'momentum': self.analyze_momentum(data),
-                'volatility': self.analyze_volatility(data),
-                'support_resistance': self.find_support_resistance(data),
-                'patterns': self.detect_patterns(data),
-                'signals': self.generate_signals(data),
-                'risk_metrics': self.calculate_risk_metrics(data)
+                'ma10': self._calculate_ma(df, 10),
+                'ema50': self._calculate_ema(df, 50),
+                'bollinger': self._calculate_bollinger_bands(df),
+                'rsi': self._calculate_rsi(df),
+                'macd': self._calculate_macd(df),
+                'wma': self._calculate_wma(df, 20),
+                'stochastic': self._calculate_stochastic(df),
+                'atr': self._calculate_atr(df),
+                'fibonacci': self._calculate_fibonacci_levels(df),
+                'pivot_points': self._calculate_pivot_points(df),
+                'support_resistance': self._calculate_support_resistance(df)
             }
+            
+            # Determine overall trend
+            analysis['trend'] = self._determine_trend(df, analysis)
+            analysis['momentum'] = self._calculate_momentum(df, analysis)
+            analysis['signal_strength'] = self._calculate_signal_strength(analysis)
+            analysis['bollinger_position'] = self._get_bollinger_position(df, analysis['bollinger'])
+            analysis['volume_trend'] = self._analyze_volume_trend(df)
             
             return analysis
             
         except Exception as e:
-            log_error("TechnicalAnalysis", f"Error analyzing {symbol}", e)
-            return {}
+            self.logger.error(f"Error in trend analysis: {e}")
+            return self._get_default_analysis()
     
-    def analyze_trend(self, data: pd.DataFrame) -> Dict[str, Any]:
-        """Analyze trend direction and strength"""
+    def _calculate_ma(self, df: pd.DataFrame, period: int) -> float:
+        """Simple Moving Average"""
         try:
-            close = data['close'].values
+            return df['close'].rolling(window=period).mean().iloc[-1]
+        except:
+            return 0.0
+    
+    def _calculate_ema(self, df: pd.DataFrame, period: int) -> float:
+        """Exponential Moving Average"""
+        try:
+            return df['close'].ewm(span=period).mean().iloc[-1]
+        except:
+            return 0.0
+    
+    def _calculate_wma(self, df: pd.DataFrame, period: int) -> float:
+        """Weighted Moving Average"""
+        try:
+            weights = np.arange(1, period + 1)
+            wma = df['close'].rolling(window=period).apply(
+                lambda prices: np.dot(prices, weights) / weights.sum(), raw=True
+            )
+            return wma.iloc[-1]
+        except:
+            return 0.0
+    
+    def _calculate_bollinger_bands(self, df: pd.DataFrame, period: int = 20, std: int = 2) -> Dict[str, float]:
+        """Bollinger Bands"""
+        try:
+            sma = df['close'].rolling(window=period).mean()
+            std_dev = df['close'].rolling(window=period).std()
             
-            # Moving averages
-            sma_20 = talib.SMA(close, timeperiod=20)
-            sma_50 = talib.SMA(close, timeperiod=50)
-            ema_12 = talib.EMA(close, timeperiod=12)
-            ema_26 = talib.EMA(close, timeperiod=26)
+            upper = sma + (std_dev * std)
+            lower = sma - (std_dev * std)
+            
+            return {
+                'upper': upper.iloc[-1],
+                'middle': sma.iloc[-1],
+                'lower': lower.iloc[-1],
+                'bandwidth': ((upper.iloc[-1] - lower.iloc[-1]) / sma.iloc[-1]) * 100
+            }
+        except:
+            return {'upper': 0, 'middle': 0, 'lower': 0, 'bandwidth': 0}
+    
+    def _calculate_rsi(self, df: pd.DataFrame, period: int = 14) -> float:
+        """RSI Calculation"""
+        try:
+            delta = df['close'].diff()
+            gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
+            loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
+            
+            rs = gain / loss
+            rsi = 100 - (100 / (1 + rs))
+            return rsi.iloc[-1]
+        except:
+            return 50.0
+    
+    def _calculate_macd(self, df: pd.DataFrame, fast: int = 12, slow: int = 26, signal: int = 9) -> Dict[str, float]:
+        """MACD Calculation"""
+        try:
+            ema_fast = df['close'].ewm(span=fast).mean()
+            ema_slow = df['close'].ewm(span=slow).mean()
+            
+            macd_line = ema_fast - ema_slow
+            signal_line = macd_line.ewm(span=signal).mean()
+            histogram = macd_line - signal_line
+            
+            return {
+                'macd': macd_line.iloc[-1],
+                'signal': signal_line.iloc[-1],
+                'histogram': histogram.iloc[-1]
+            }
+        except:
+            return {'macd': 0, 'signal': 0, 'histogram': 0}
+    
+    def _calculate_stochastic(self, df: pd.DataFrame, k_period: int = 14, d_period: int = 3) -> Dict[str, float]:
+        """Stochastic Oscillator"""
+        try:
+            lowest_low = df['low'].rolling(window=k_period).min()
+            highest_high = df['high'].rolling(window=k_period).max()
+            
+            k_percent = 100 * ((df['close'] - lowest_low) / (highest_high - lowest_low))
+            d_percent = k_percent.rolling(window=d_period).mean()
+            
+            return {
+                'k': k_percent.iloc[-1],
+                'd': d_percent.iloc[-1]
+            }
+        except:
+            return {'k': 50, 'd': 50}
+    
+    def _calculate_atr(self, df: pd.DataFrame, period: int = 14) -> float:
+        """Average True Range"""
+        try:
+            high_low = df['high'] - df['low']
+            high_close = np.abs(df['high'] - df['close'].shift())
+            low_close = np.abs(df['low'] - df['close'].shift())
+            
+            ranges = pd.concat([high_low, high_close, low_close], axis=1)
+            true_range = np.max(ranges, axis=1)
+            
+            return true_range.rolling(window=period).mean().iloc[-1]
+        except:
+            return 0.0
+    
+    def _calculate_fibonacci_levels(self, df: pd.DataFrame, period: int = 50) -> Dict[str, float]:
+        """Fibonacci Retracement Levels"""
+        try:
+            recent_data = df.tail(period)
+            high_price = recent_data['high'].max()
+            low_price = recent_data['low'].min()
+            
+            diff = high_price - low_price
+            
+            return {
+                'level_0': high_price,
+                'level_236': high_price - 0.236 * diff,
+                'level_382': high_price - 0.382 * diff,
+                'level_50': high_price - 0.5 * diff,
+                'level_618': high_price - 0.618 * diff,
+                'level_786': high_price - 0.786 * diff,
+                'level_100': low_price
+            }
+        except:
+            return {f'level_{i}': 0 for i in ['0', '236', '382', '50', '618', '786', '100']}
+    
+    def _calculate_pivot_points(self, df: pd.DataFrame) -> Dict[str, float]:
+        """Daily Pivot Points"""
+        try:
+            yesterday = df.tail(1)
+            high = yesterday['high'].iloc[0]
+            low = yesterday['low'].iloc[0]
+            close = yesterday['close'].iloc[0]
+            
+            pivot = (high + low + close) / 3
+            
+            return {
+                'pivot': pivot,
+                'r1': 2 * pivot - low,
+                'r2': pivot + (high - low),
+                'r3': high + 2 * (pivot - low),
+                's1': 2 * pivot - high,
+                's2': pivot - (high - low),
+                's3': low - 2 * (high - pivot)
+            }
+        except:
+            return {f'{level}': 0 for level in ['pivot', 'r1', 'r2', 'r3', 's1', 's2', 's3']}
+    
+    def _calculate_support_resistance(self, df: pd.DataFrame, period: int = 20) -> Dict[str, List[float]]:
+        """Dynamic Support and Resistance Levels"""
+        try:
+            recent_data = df.tail(period * 2)
+            
+            # Find local highs and lows
+            highs = recent_data[recent_data['high'] == recent_data['high'].rolling(window=5, center=True).max()]['high'].tolist()
+            lows = recent_data[recent_data['low'] == recent_data['low'].rolling(window=5, center=True).min()]['low'].tolist()
+            
+            # Remove duplicates and sort
+            resistance_levels = sorted(list(set(highs)), reverse=True)[:3]
+            support_levels = sorted(list(set(lows)))[:3]
+            
+            return {
+                'resistance': resistance_levels,
+                'support': support_levels
+            }
+        except:
+            return {'resistance': [], 'support': []}
+    
+    def _determine_trend(self, df: pd.DataFrame, analysis: Dict) -> str:
+        """Determine overall trend direction"""
+        try:
+            current_price = df['close'].iloc[-1]
+            ma10 = analysis['ma10']
+            ema50 = analysis['ema50']
+            
+            bullish_signals = 0
+            bearish_signals = 0
+            
+            # Price vs Moving Averages
+            if current_price > ma10:
+                bullish_signals += 1
+            else:
+                bearish_signals += 1
+                
+            if current_price > ema50:
+                bullish_signals += 1
+            else:
+                bearish_signals += 1
             
             # MACD
-            macd, macd_signal, macd_hist = talib.MACD(close)
-            
-            # ADX for trend strength
-            high = data['high'].values
-            low = data['low'].values
-            adx = talib.ADX(high, low, close, timeperiod=14)
-            
-            # Current values
-            current_price = close[-1]
-            current_sma20 = sma_20[-1] if not np.isnan(sma_20[-1]) else current_price
-            current_sma50 = sma_50[-1] if not np.isnan(sma_50[-1]) else current_price
-            current_adx = adx[-1] if not np.isnan(adx[-1]) else 25
-            current_macd = macd[-1] if not np.isnan(macd[-1]) else 0
-            current_signal = macd_signal[-1] if not np.isnan(macd_signal[-1]) else 0
-            
-            # Trend determination
-            trend_direction = "NEUTRAL"
-            if current_price > current_sma20 > current_sma50 and current_macd > current_signal:
-                trend_direction = "BULLISH"
-            elif current_price < current_sma20 < current_sma50 and current_macd < current_signal:
-                trend_direction = "BEARISH"
-            
-            # Trend strength
-            trend_strength = "WEAK"
-            if current_adx > 40:
-                trend_strength = "VERY_STRONG"
-            elif current_adx > 25:
-                trend_strength = "STRONG"
-            elif current_adx > 15:
-                trend_strength = "MODERATE"
-            
-            return {
-                'direction': trend_direction,
-                'strength': trend_strength,
-                'adx': current_adx,
-                'sma_20': current_sma20,
-                'sma_50': current_sma50,
-                'macd': current_macd,
-                'macd_signal': current_signal,
-                'price_vs_sma20': (current_price - current_sma20) / current_sma20 * 100
-            }
-            
-        except Exception as e:
-            log_error("TechnicalAnalysis", "Error in trend analysis", e)
-            return {}
-    
-    def analyze_momentum(self, data: pd.DataFrame) -> Dict[str, Any]:
-        """Analyze momentum indicators"""
-        try:
-            close = data['close'].values
-            high = data['high'].values
-            low = data['low'].values
+            if analysis['macd']['macd'] > analysis['macd']['signal']:
+                bullish_signals += 1
+            else:
+                bearish_signals += 1
             
             # RSI
-            rsi = talib.RSI(close, timeperiod=14)
+            rsi = analysis['rsi']
+            if 40 < rsi < 60:
+                pass  # Neutral
+            elif rsi > 60:
+                bullish_signals += 1
+            elif rsi < 40:
+                bearish_signals += 1
             
-            # Stochastic
-            slowk, slowd = talib.STOCH(high, low, close)
+            if bullish_signals > bearish_signals:
+                return "BULLISH"
+            elif bearish_signals > bullish_signals:
+                return "BEARISH"
+            else:
+                return "NEUTRAL"
+                
+        except:
+            return "NEUTRAL"
+    
+    def _calculate_momentum(self, df: pd.DataFrame, analysis: Dict) -> str:
+        """Calculate price momentum"""
+        try:
+            macd_histogram = analysis['macd']['histogram']
+            rsi = analysis['rsi']
+            stoch_k = analysis['stochastic']['k']
             
-            # Williams %R
-            willr = talib.WILLR(high, low, close, timeperiod=14)
+            if macd_histogram > 0 and rsi > 55 and stoch_k > 50:
+                return "STRONG_BULLISH"
+            elif macd_histogram < 0 and rsi < 45 and stoch_k < 50:
+                return "STRONG_BEARISH"
+            elif macd_histogram > 0 or rsi > 50:
+                return "WEAK_BULLISH"
+            elif macd_histogram < 0 or rsi < 50:
+                return "WEAK_BEARISH"
+            else:
+                return "NEUTRAL"
+        except:
+            return "NEUTRAL"
+    
+    def _calculate_signal_strength(self, analysis: Dict) -> float:
+        """Calculate signal strength (0-100)"""
+        try:
+            strength = 50  # Base strength
             
-            # CCI
-            cci = talib.CCI(high, low, close, timeperiod=14)
+            # RSI contribution
+            rsi = analysis['rsi']
+            if rsi > 70:
+                strength += 15  # Overbought
+            elif rsi < 30:
+                strength += 15  # Oversold
+            elif 45 < rsi < 55:
+                strength -= 10  # Neutral zone
             
-            # Current values
-            current_rsi = rsi[-1] if not np.isnan(rsi[-1]) else 50
-            current_stoch_k = slowk[-1] if not np.isnan(slowk[-1]) else 50
-            current_willr = willr[-1] if not np.isnan(willr[-1]) else -50
-            current_cci = cci[-1] if not np.isnan(cci[-1]) else 0
+            # MACD contribution
+            macd = analysis['macd']
+            if abs(macd['histogram']) > abs(macd['macd']) * 0.1:
+                strength += 10
             
-            # Momentum assessment
-            momentum_score = 0
+            # Stochastic contribution
+            stoch = analysis['stochastic']
+            if stoch['k'] > 80 or stoch['k'] < 20:
+                strength += 10
             
-            # RSI scoring
-            if current_rsi > 70:
-                momentum_score -= 2  # Overbought
-            elif current_rsi > 60:
-                momentum_score += 1  # Bullish
-            elif current_rsi < 30:
-                momentum_score += 2  # Oversold (bullish reversal)
-            elif current_rsi < 40:
-                momentum_score -= 1  # Bearish
+            return min(max(strength, 0), 100)
+        except:
+            return 50
+    
+    def _get_bollinger_position(self, df: pd.DataFrame, bollinger: Dict) -> str:
+        """Determine position relative to Bollinger Bands"""
+        try:
+            current_price = df['close'].iloc[-1]
+            upper = bollinger['upper']
+            lower = bollinger['lower']
+            middle = bollinger['middle']
             
-            # Stochastic scoring
-            if current_stoch_k > 80:
-                momentum_score -= 1
-            elif current_stoch_k < 20:
-                momentum_score += 1
+            if current_price > upper:
+                return "ABOVE_UPPER"
+            elif current_price < lower:
+                return "BELOW_LOWER"
+            elif current_price > middle:
+                return "UPPER_HALF"
+            else:
+                return "LOWER_HALF"
+        except:
+            return "MIDDLE"
+    
+    def _analyze_volume_trend(self, df: pd.DataFrame) -> str:
+        """Analyze volume trend"""
+        try:
+            if 'tick_volume' not in df.columns:
+                return "NORMAL"
             
-            momentum_signal = "NEUTRAL"
-            if momentum_score >= 2:
-                momentum_signal = "BULLISH"
-            elif momentum_score <= -2:
-                momentum_signal = "BEARISH"
+            recent_volume = df['tick_volume'].tail(5).mean()
+            previous_volume = df['tick_volume'].tail(20).head(15).mean()
             
-            return {
-                'signal': momentum_signal,
-                'score': momentum_score,
-                'rsi': current_rsi,
-                'stoch_k': current_stoch_k,
-                'willr': current_willr,
-                'cci': current_cci,
-                'overbought': current_rsi > 70 or current_stoch_k > 80,
-                'oversold': current_rsi < 30 or current_stoch_k < 20
+            if recent_volume > previous_volume * 1.5:
+                return "HIGH"
+            elif recent_volume < previous_volume * 0.7:
+                return "LOW"
+            else:
+                return "NORMAL"
+        except:
+            return "NORMAL"
+    
+    def _get_default_analysis(self) -> Dict[str, Any]:
+        """Return default analysis when calculation fails"""
+        return {
+            'trend': 'NEUTRAL',
+            'momentum': 'NEUTRAL',
+            'signal_strength': 50,
+            'rsi': 50,
+            'macd': {'macd': 0, 'signal': 0, 'histogram': 0},
+            'bollinger_position': 'MIDDLE',
+            'volume_trend': 'NORMAL',
+            'ma10': 0,
+            'ema50': 0,
+            'bollinger': {'upper': 0, 'middle': 0, 'lower': 0},
+            'stochastic': {'k': 50, 'd': 50},
+            'atr': 0,
+            'fibonacci': {},
+            'pivot_points': {},
+            'support_resistance': {'resistance': [], 'support': []}
+        }
+    
+    def get_trading_signals(self, df: pd.DataFrame) -> Dict[str, Any]:
+        """Generate trading signals based on technical analysis"""
+        try:
+            analysis = self.analyze_trends(df)
+            
+            signals = {
+                'action': 'HOLD',
+                'confidence': 0.0,
+                'stop_loss_pips': 20,
+                'take_profit_pips': 40,
+                'reasoning': []
             }
             
-        except Exception as e:
-            log_error("TechnicalAnalysis", "Error in momentum analysis", e)
-            return {}
-    
-    def analyze_volatility(self, data: pd.DataFrame) -> Dict[str, Any]:
-        """Analyze volatility and market conditions"""
-        try:
-            close = data['close'].values
-            high = data['high'].values
-            low = data['low'].values
+            confidence = 0
+            reasoning = []
+            
+            # Fast signals (Price Action, MA10)
+            current_price = df['close'].iloc[-1]
+            ma10 = analysis['ma10']
+            
+            if current_price > ma10:
+                confidence += 20
+                reasoning.append("Price above MA10")
+            elif current_price < ma10:
+                confidence += 20
+                reasoning.append("Price below MA10")
+            
+            # Slow signals (EMA50, RSI)
+            ema50 = analysis['ema50']
+            rsi = analysis['rsi']
+            
+            if current_price > ema50 and rsi < 70:
+                confidence += 15
+                reasoning.append("Bullish trend confirmed")
+                signals['action'] = 'BUY'
+            elif current_price < ema50 and rsi > 30:
+                confidence += 15
+                reasoning.append("Bearish trend confirmed")
+                signals['action'] = 'SELL'
+            
+            # MACD confirmation
+            if analysis['macd']['histogram'] > 0:
+                confidence += 10
+                reasoning.append("MACD bullish")
+            elif analysis['macd']['histogram'] < 0:
+                confidence += 10
+                reasoning.append("MACD bearish")
             
             # Bollinger Bands
-            bb_upper, bb_middle, bb_lower = talib.BBANDS(close)
+            bb_pos = analysis['bollinger_position']
+            if bb_pos == 'BELOW_LOWER':
+                confidence += 15
+                reasoning.append("Oversold on Bollinger")
+                if signals['action'] == 'HOLD':
+                    signals['action'] = 'BUY'
+            elif bb_pos == 'ABOVE_UPPER':
+                confidence += 15
+                reasoning.append("Overbought on Bollinger")
+                if signals['action'] == 'HOLD':
+                    signals['action'] = 'SELL'
             
-            # ATR
-            atr = talib.ATR(high, low, close, timeperiod=14)
+            signals['confidence'] = min(confidence / 100.0, 1.0)
+            signals['reasoning'] = reasoning
             
-            # Current values
-            current_price = close[-1]
-            current_bb_upper = bb_upper[-1] if not np.isnan(bb_upper[-1]) else current_price * 1.02
-            current_bb_lower = bb_lower[-1] if not np.isnan(bb_lower[-1]) else current_price * 0.98
-            current_bb_middle = bb_middle[-1] if not np.isnan(bb_middle[-1]) else current_price
-            current_atr = atr[-1] if not np.isnan(atr[-1]) else current_price * 0.01
+            # Dynamic SL/TP based on ATR
+            atr = analysis['atr']
+            if atr > 0:
+                signals['stop_loss_pips'] = max(15, int(atr * 1.5))
+                signals['take_profit_pips'] = max(30, int(atr * 3))
             
-            # Bollinger Band position
-            bb_position = (current_price - current_bb_lower) / (current_bb_upper - current_bb_lower)
-            
-            # Volatility level
-            atr_percent = (current_atr / current_price) * 100
-            volatility_level = "LOW"
-            if atr_percent > 2.0:
-                volatility_level = "HIGH"
-            elif atr_percent > 1.0:
-                volatility_level = "MEDIUM"
-            
-            # Squeeze detection
-            bb_width = (current_bb_upper - current_bb_lower) / current_bb_middle
-            is_squeeze = bb_width < 0.1  # Adjust threshold as needed
-            
-            return {
-                'level': volatility_level,
-                'atr': current_atr,
-                'atr_percent': atr_percent,
-                'bb_upper': current_bb_upper,
-                'bb_middle': current_bb_middle,
-                'bb_lower': current_bb_lower,
-                'bb_position': bb_position,
-                'bb_width': bb_width,
-                'is_squeeze': is_squeeze,
-                'near_bb_upper': bb_position > 0.8,
-                'near_bb_lower': bb_position < 0.2
-            }
+            return signals
             
         except Exception as e:
-            log_error("TechnicalAnalysis", "Error in volatility analysis", e)
-            return {}
-    
-    def find_support_resistance(self, data: pd.DataFrame) -> Dict[str, List[float]]:
-        """Find key support and resistance levels"""
-        try:
-            high = data['high'].values
-            low = data['low'].values
-            close = data['close'].values
-            
-            # Pivot points
-            pivot_high = []
-            pivot_low = []
-            
-            for i in range(2, len(data) - 2):
-                # High pivot
-                if (high[i] > high[i-1] and high[i] > high[i-2] and 
-                    high[i] > high[i+1] and high[i] > high[i+2]):
-                    pivot_high.append(high[i])
-                
-                # Low pivot
-                if (low[i] < low[i-1] and low[i] < low[i-2] and 
-                    low[i] < low[i+1] and low[i] < low[i+2]):
-                    pivot_low.append(low[i])
-            
-            # Get recent significant levels
-            current_price = close[-1]
-            resistance_levels = [r for r in pivot_high if r > current_price][-3:]
-            support_levels = [s for s in pivot_low if s < current_price][-3:]
-            
+            self.logger.error(f"Error generating trading signals: {e}")
             return {
-                'resistance': sorted(resistance_levels)[:3],
-                'support': sorted(support_levels, reverse=True)[:3],
-                'pivot_highs': pivot_high,
-                'pivot_lows': pivot_low
+                'action': 'HOLD',
+                'confidence': 0.0,
+                'stop_loss_pips': 20,
+                'take_profit_pips': 40,
+                'reasoning': ['Analysis error']
             }
-            
-        except Exception as e:
-            log_error("TechnicalAnalysis", "Error finding support/resistance", e)
-            return {'resistance': [], 'support': [], 'pivot_highs': [], 'pivot_lows': []}
-    
-    def detect_patterns(self, data: pd.DataFrame) -> Dict[str, Any]:
-        """Detect chart patterns"""
-        try:
-            open_prices = data['open'].values
-            high = data['high'].values
-            low = data['low'].values
-            close = data['close'].values
-            
-            # Candlestick patterns
-            patterns = {}
-            
-            # Doji
-            doji = talib.CDLDOJI(open_prices, high, low, close)
-            patterns['doji'] = bool(doji[-1] != 0)
-            
-            # Hammer
-            hammer = talib.CDLHAMMER(open_prices, high, low, close)
-            patterns['hammer'] = bool(hammer[-1] != 0)
-            
-            # Engulfing
-            engulfing = talib.CDLENGULFING(open_prices, high, low, close)
-            patterns['engulfing'] = bool(engulfing[-1] != 0)
-            
-            # Morning Star
-            morning_star = talib.CDLMORNINGSTAR(open_prices, high, low, close)
-            patterns['morning_star'] = bool(morning_star[-1] != 0)
-            
-            # Evening Star
-            evening_star = talib.CDLEVENINGSTAR(open_prices, high, low, close)
-            patterns['evening_star'] = bool(evening_star[-1] != 0)
-            
-            # Pattern summary
-            bullish_patterns = ['hammer', 'morning_star'] + ['engulfing' if engulfing[-1] > 0 else None]
-            bearish_patterns = ['evening_star'] + ['engulfing' if engulfing[-1] < 0 else None]
-            
-            bullish_count = sum(1 for p in bullish_patterns if p and patterns.get(p, False))
-            bearish_count = sum(1 for p in bearish_patterns if p and patterns.get(p, False))
-            
-            pattern_signal = "NEUTRAL"
-            if bullish_count > bearish_count:
-                pattern_signal = "BULLISH"
-            elif bearish_count > bullish_count:
-                pattern_signal = "BEARISH"
-            
-            return {
-                'signal': pattern_signal,
-                'patterns': patterns,
-                'bullish_count': bullish_count,
-                'bearish_count': bearish_count
-            }
-            
-        except Exception as e:
-            log_error("TechnicalAnalysis", "Error detecting patterns", e)
-            return {'signal': 'NEUTRAL', 'patterns': {}, 'bullish_count': 0, 'bearish_count': 0}
-    
-    def generate_signals(self, data: pd.DataFrame) -> Dict[str, Any]:
-        """Generate combined trading signals"""
-        try:
-            # Get all analysis components
-            trend = self.analyze_trend(data)
-            momentum = self.analyze_momentum(data)
-            volatility = self.analyze_volatility(data)
-            patterns = self.detect_patterns(data)
-            
-            # Signal scoring
-            signal_score = 0
-            confidence = 0.5
-            
-            # Trend component (40% weight)
-            if trend.get('direction') == 'BULLISH':
-                signal_score += 2
-            elif trend.get('direction') == 'BEARISH':
-                signal_score -= 2
-            
-            # Momentum component (30% weight)
-            if momentum.get('signal') == 'BULLISH':
-                signal_score += 1.5
-            elif momentum.get('signal') == 'BEARISH':
-                signal_score -= 1.5
-            
-            # Pattern component (20% weight)
-            if patterns.get('signal') == 'BULLISH':
-                signal_score += 1
-            elif patterns.get('signal') == 'BEARISH':
-                signal_score -= 1
-            
-            # Volatility adjustment (10% weight)
-            if volatility.get('level') == 'HIGH':
-                signal_score *= 0.8  # Reduce signal strength in high volatility
-            
-            # Determine final signal
-            signal = "NEUTRAL"
-            if signal_score >= 2.5:
-                signal = "STRONG_BUY"
-                confidence = min(0.9, 0.5 + abs(signal_score) * 0.1)
-            elif signal_score >= 1.5:
-                signal = "BUY"
-                confidence = min(0.8, 0.5 + abs(signal_score) * 0.1)
-            elif signal_score <= -2.5:
-                signal = "STRONG_SELL"
-                confidence = min(0.9, 0.5 + abs(signal_score) * 0.1)
-            elif signal_score <= -1.5:
-                signal = "SELL"
-                confidence = min(0.8, 0.5 + abs(signal_score) * 0.1)
-            
-            return {
-                'signal': signal,
-                'score': signal_score,
-                'confidence': confidence,
-                'components': {
-                    'trend': trend.get('direction', 'NEUTRAL'),
-                    'momentum': momentum.get('signal', 'NEUTRAL'),
-                    'patterns': patterns.get('signal', 'NEUTRAL'),
-                    'volatility': volatility.get('level', 'MEDIUM')
-                }
-            }
-            
-        except Exception as e:
-            log_error("TechnicalAnalysis", "Error generating signals", e)
-            return {'signal': 'NEUTRAL', 'score': 0, 'confidence': 0.5, 'components': {}}
-    
-    def calculate_risk_metrics(self, data: pd.DataFrame) -> Dict[str, float]:
-        """Calculate risk metrics for position sizing"""
-        try:
-            close = data['close'].values
-            
-            # Volatility measures
-            returns = np.diff(close) / close[:-1]
-            volatility = np.std(returns) * np.sqrt(252)  # Annualized
-            
-            # Value at Risk (95% confidence)
-            var_95 = np.percentile(returns, 5)
-            
-            # Maximum drawdown
-            peak = np.maximum.accumulate(close)
-            drawdown = (close - peak) / peak
-            max_drawdown = np.min(drawdown)
-            
-            return {
-                'volatility': volatility,
-                'var_95': var_95,
-                'max_drawdown': max_drawdown,
-                'current_drawdown': drawdown[-1]
-            }
-            
-        except Exception as e:
-            log_error("TechnicalAnalysis", "Error calculating risk metrics", e)
-            return {'volatility': 0.1, 'var_95': -0.02, 'max_drawdown': -0.05, 'current_drawdown': 0}
