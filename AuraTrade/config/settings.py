@@ -1,69 +1,97 @@
 
 """
-Settings Module for AuraTrade Bot
-User-configurable settings and preferences
+Settings management for AuraTrade Bot
+Handles user preferences and trading parameters
 """
 
-import os
 import json
-from typing import Dict, Any, List
+import os
+from typing import Dict, Any, Optional
 from utils.logger import Logger
 
 class Settings:
-    """User settings and preferences manager"""
+    """Settings management for AuraTrade Bot"""
     
-    def __init__(self, settings_file: str = "AuraTrade/config/user_settings.json"):
+    def __init__(self, settings_file: str = "AuraTrade/config/settings.json"):
         self.logger = Logger().get_logger()
         self.settings_file = settings_file
         self.settings = self._load_default_settings()
         self.load_settings()
-    
+        
     def _load_default_settings(self) -> Dict[str, Any]:
         """Load default settings"""
         return {
             'trading': {
-                'default_symbol': 'EURUSD',
-                'default_lot_size': 0.01,
-                'max_open_trades': 10,
-                'scalping_tp_pips': 8,
-                'scalping_sl_pips': 12,
-                'general_tp_pips': 40,
-                'general_sl_pips': 20,
-                'tp_type': 'pips',  # 'pips', 'price', 'percent'
-                'sl_type': 'pips',  # 'pips', 'price', 'percent'
-                'auto_close_profit_percent': 10.0,
-                'max_daily_loss_percent': 5.0,
-                'max_drawdown_percent': 5.0,
+                'auto_trading_enabled': False,
+                'max_positions': 10,
+                'max_positions_per_symbol': 3,
+                'default_volume': 0.01,
+                'default_tp_pips': 40,
+                'default_sl_pips': 20,
+                'max_spread_pips': 3.0,
+                'trading_sessions_enabled': True,
+                'weekend_trading': False,
+                'news_filter_enabled': True,
+            },
+            'risk_management': {
+                'risk_per_trade': 1.0,
+                'max_daily_risk': 5.0,
+                'max_drawdown': 10.0,
+                'emergency_stop_enabled': True,
+                'margin_level_threshold': 200.0,
+                'conservative_mode': True,
             },
             'strategies': {
-                'active_strategy': 'scalping',
                 'scalping_enabled': True,
-                'intraday_enabled': True,
-                'arbitrage_enabled': True,
                 'hft_enabled': True,
+                'pattern_enabled': True,
+                'arbitrage_enabled': False,
+                'swing_enabled': False,
+                'strategy_allocation': {
+                    'scalping': 40,
+                    'hft': 30,
+                    'pattern': 30
+                }
+            },
+            'symbols': {
+                'enabled_symbols': ['EURUSD', 'GBPUSD', 'USDJPY', 'XAUUSD'],
+                'auto_detect_symbols': True,
+                'major_pairs_only': True,
+                'include_metals': True,
+                'include_crypto': False,
             },
             'gui': {
                 'theme': 'dark',
-                'auto_refresh_interval': 1000,
+                'update_interval': 1000,
                 'show_notifications': True,
-                'save_window_position': True,
-                'window_width': 1400,
-                'window_height': 900,
+                'sound_alerts': True,
+                'auto_save_logs': True,
+                'chart_refresh_rate': 500,
+                'window_size': {'width': 1400, 'height': 900},
+                'always_on_top': False,
             },
             'notifications': {
                 'telegram_enabled': False,
-                'telegram_token': '',
-                'telegram_chat_id': '',
-                'notify_on_start': True,
-                'notify_on_trade': True,
-                'notify_on_stop': True,
-                'notify_on_error': True,
+                'email_enabled': False,
+                'desktop_enabled': True,
+                'sound_enabled': True,
+                'notify_trades': True,
+                'notify_errors': True,
+                'notify_system_status': True,
             },
-            'logging': {
-                'log_level': 'INFO',
-                'export_trades_csv': True,
-                'daily_summary': True,
-                'separate_buy_sell_files': True,
+            'data': {
+                'update_interval_ms': 100,
+                'history_bars': 100,
+                'cache_timeout_minutes': 60,
+                'enable_data_validation': True,
+                'auto_cleanup_old_data': True,
+            },
+            'performance': {
+                'target_win_rate': 75.0,
+                'target_profit_factor': 2.0,
+                'max_consecutive_losses': 5,
+                'daily_profit_target': 2.0,
+                'monthly_profit_target': 20.0,
             }
         }
     
@@ -72,12 +100,12 @@ class Settings:
         try:
             if os.path.exists(self.settings_file):
                 with open(self.settings_file, 'r') as f:
-                    loaded_settings = json.load(f)
-                    # Merge with defaults to ensure all keys exist
-                    self._merge_settings(self.settings, loaded_settings)
+                    user_settings = json.load(f)
+                    self._merge_settings(user_settings)
                 self.logger.info("Settings loaded successfully")
                 return True
             else:
+                self.logger.info("No settings file found, using defaults")
                 self.save_settings()  # Create default settings file
                 return True
         except Exception as e:
@@ -96,20 +124,28 @@ class Settings:
             self.logger.error(f"Error saving settings: {e}")
             return False
     
-    def _merge_settings(self, defaults: Dict, loaded: Dict):
-        """Recursively merge loaded settings with defaults"""
-        for key, value in loaded.items():
-            if key in defaults:
-                if isinstance(value, dict) and isinstance(defaults[key], dict):
-                    self._merge_settings(defaults[key], value)
+    def _merge_settings(self, user_settings: Dict[str, Any]):
+        """Merge user settings with defaults"""
+        def merge_dict(default: dict, user: dict):
+            for key, value in user.items():
+                if key in default:
+                    if isinstance(default[key], dict) and isinstance(value, dict):
+                        merge_dict(default[key], value)
+                    else:
+                        default[key] = value
                 else:
-                    defaults[key] = value
+                    default[key] = value
+        
+        merge_dict(self.settings, user_settings)
     
-    def get(self, section: str, key: str = None) -> Any:
+    def get(self, section: str, key: str = None, default: Any = None) -> Any:
         """Get setting value"""
-        if key is None:
-            return self.settings.get(section, {})
-        return self.settings.get(section, {}).get(key)
+        try:
+            if key is None:
+                return self.settings.get(section, default)
+            return self.settings.get(section, {}).get(key, default)
+        except Exception:
+            return default
     
     def set(self, section: str, key: str, value: Any) -> bool:
         """Set setting value"""
@@ -117,102 +153,114 @@ class Settings:
             if section not in self.settings:
                 self.settings[section] = {}
             self.settings[section][key] = value
-            return self.save_settings()
+            return True
         except Exception as e:
-            self.logger.error(f"Error setting {section}.{key}: {e}")
+            self.logger.error(f"Error setting value: {e}")
             return False
     
     def get_trading_settings(self) -> Dict[str, Any]:
-        """Get all trading settings"""
+        """Get trading settings"""
         return self.settings.get('trading', {})
     
+    def get_risk_settings(self) -> Dict[str, Any]:
+        """Get risk management settings"""
+        return self.settings.get('risk_management', {})
+    
     def get_strategy_settings(self) -> Dict[str, Any]:
-        """Get all strategy settings"""
+        """Get strategy settings"""
         return self.settings.get('strategies', {})
     
     def get_gui_settings(self) -> Dict[str, Any]:
-        """Get all GUI settings"""
+        """Get GUI settings"""
         return self.settings.get('gui', {})
     
     def get_notification_settings(self) -> Dict[str, Any]:
-        """Get all notification settings"""
+        """Get notification settings"""
         return self.settings.get('notifications', {})
     
-    def calculate_tp_sl_values(self, symbol: str, action: str, current_price: float, 
-                              tp_value: float, sl_value: float, tp_type: str, sl_type: str, 
-                              lot_size: float = 0.01) -> Dict[str, Any]:
-        """Calculate TP/SL values in different formats"""
+    def get_enabled_symbols(self) -> list:
+        """Get list of enabled trading symbols"""
+        return self.settings.get('symbols', {}).get('enabled_symbols', ['EURUSD'])
+    
+    def is_strategy_enabled(self, strategy_name: str) -> bool:
+        """Check if a strategy is enabled"""
+        return self.settings.get('strategies', {}).get(f'{strategy_name}_enabled', False)
+    
+    def update_trading_setting(self, key: str, value: Any) -> bool:
+        """Update trading setting"""
+        return self.set('trading', key, value)
+    
+    def update_risk_setting(self, key: str, value: Any) -> bool:
+        """Update risk management setting"""
+        return self.set('risk_management', key, value)
+    
+    def enable_strategy(self, strategy_name: str, enabled: bool = True) -> bool:
+        """Enable/disable a strategy"""
+        return self.set('strategies', f'{strategy_name}_enabled', enabled)
+    
+    def reset_to_defaults(self) -> bool:
+        """Reset all settings to defaults"""
         try:
-            # Mock symbol info for calculation
-            point = 0.00001 if 'JPY' not in symbol else 0.001
-            if 'XAU' in symbol or 'XAG' in symbol:
-                point = 0.01
-            
-            pip_value = 10 * lot_size if 'JPY' not in symbol else lot_size
-            if 'XAU' in symbol:
-                pip_value = lot_size
-            
-            result = {
-                'tp_price': 0.0,
-                'sl_price': 0.0,
-                'tp_pips': 0.0,
-                'sl_pips': 0.0,
-                'tp_profit_usd': 0.0,
-                'sl_loss_usd': 0.0,
-                'tp_profit_percent': 0.0,
-                'sl_loss_percent': 0.0
-            }
-            
-            # Calculate TP
-            if tp_type == 'pips':
-                tp_pips = tp_value
-                if action.lower() == 'buy':
-                    tp_price = current_price + (tp_pips * point)
-                else:
-                    tp_price = current_price - (tp_pips * point)
-            elif tp_type == 'price':
-                tp_price = tp_value
-                tp_pips = abs(tp_price - current_price) / point
-            else:  # percent
-                profit_amount = (tp_value / 100) * 10000  # Assuming $10,000 balance
-                tp_pips = profit_amount / pip_value
-                if action.lower() == 'buy':
-                    tp_price = current_price + (tp_pips * point)
-                else:
-                    tp_price = current_price - (tp_pips * point)
-            
-            # Calculate SL
-            if sl_type == 'pips':
-                sl_pips = sl_value
-                if action.lower() == 'buy':
-                    sl_price = current_price - (sl_pips * point)
-                else:
-                    sl_price = current_price + (sl_pips * point)
-            elif sl_type == 'price':
-                sl_price = sl_value
-                sl_pips = abs(current_price - sl_price) / point
-            else:  # percent
-                loss_amount = (sl_value / 100) * 10000  # Assuming $10,000 balance
-                sl_pips = loss_amount / pip_value
-                if action.lower() == 'buy':
-                    sl_price = current_price - (sl_pips * point)
-                else:
-                    sl_price = current_price + (sl_pips * point)
-            
-            # Calculate profit/loss in USD and percent
-            result.update({
-                'tp_price': tp_price,
-                'sl_price': sl_price,
-                'tp_pips': tp_pips,
-                'sl_pips': sl_pips,
-                'tp_profit_usd': tp_pips * pip_value,
-                'sl_loss_usd': sl_pips * pip_value,
-                'tp_profit_percent': (tp_pips * pip_value) / 10000 * 100,
-                'sl_loss_percent': (sl_pips * pip_value) / 10000 * 100
-            })
-            
-            return result
-            
+            self.settings = self._load_default_settings()
+            self.save_settings()
+            self.logger.info("Settings reset to defaults")
+            return True
         except Exception as e:
-            self.logger.error(f"Error calculating TP/SL values: {e}")
-            return result
+            self.logger.error(f"Error resetting settings: {e}")
+            return False
+    
+    def export_settings(self, file_path: str) -> bool:
+        """Export settings to file"""
+        try:
+            with open(file_path, 'w') as f:
+                json.dump(self.settings, f, indent=4)
+            self.logger.info(f"Settings exported to {file_path}")
+            return True
+        except Exception as e:
+            self.logger.error(f"Error exporting settings: {e}")
+            return False
+    
+    def import_settings(self, file_path: str) -> bool:
+        """Import settings from file"""
+        try:
+            with open(file_path, 'r') as f:
+                imported_settings = json.load(f)
+            self._merge_settings(imported_settings)
+            self.save_settings()
+            self.logger.info(f"Settings imported from {file_path}")
+            return True
+        except Exception as e:
+            self.logger.error(f"Error importing settings: {e}")
+            return False
+    
+    def get_settings_summary(self) -> str:
+        """Get formatted settings summary"""
+        trading = self.get_trading_settings()
+        risk = self.get_risk_settings()
+        strategies = self.get_strategy_settings()
+        
+        summary = f"""
+AuraTrade Bot Settings Summary:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+🔧 Trading Settings:
+  • Auto Trading: {'✅ Enabled' if trading.get('auto_trading_enabled') else '❌ Disabled'}
+  • Max Positions: {trading.get('max_positions', 'N/A')}
+  • Default Volume: {trading.get('default_volume', 'N/A')}
+  • TP/SL: {trading.get('default_tp_pips', 'N/A')}/{trading.get('default_sl_pips', 'N/A')} pips
+
+⚠️ Risk Management:
+  • Risk per Trade: {risk.get('risk_per_trade', 'N/A')}%
+  • Max Daily Risk: {risk.get('max_daily_risk', 'N/A')}%
+  • Max Drawdown: {risk.get('max_drawdown', 'N/A')}%
+  • Conservative Mode: {'✅ On' if risk.get('conservative_mode') else '❌ Off'}
+
+📈 Active Strategies:
+  • Scalping: {'✅' if strategies.get('scalping_enabled') else '❌'}
+  • HFT: {'✅' if strategies.get('hft_enabled') else '❌'}
+  • Pattern: {'✅' if strategies.get('pattern_enabled') else '❌'}
+  • Arbitrage: {'✅' if strategies.get('arbitrage_enabled') else '❌'}
+
+💱 Symbols: {', '.join(self.get_enabled_symbols())}
+        """
+        return summary.strip()

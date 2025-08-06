@@ -8,7 +8,7 @@ packages = ["cairo", "ffmpeg-full", "freetype", "ghostscript", "glibcLocales", "
 run = ["sh", "-c", "cd AuraTrade && python bot.py"]
 
 [workflows]
-runButton = "Install and Run AuraTrade Fixed"
+runButton = "AuraTrade Complete Setup"
 
 [[workflows.workflow]]
 name = "Run TradeMind Bot"
@@ -118,6 +118,63 @@ args = "if [ ! -f .env ]; then cp .env.example .env; fi"
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "echo \"Starting AuraTrade Bot...\""
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "cd AuraTrade && python bot.py"
+
+[[workflows.workflow]]
+name = "AuraTrade Complete Setup"
+author = 46036441
+mode = "sequential"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "echo \"🚀 Setting up AuraTrade Bot...\""
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "echo \"Installing Python packages...\""
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "python -m pip install --upgrade pip setuptools wheel"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "python -m pip install colorlog>=6.7.0 MetaTrader5>=5.0.45 pandas>=1.5.0 numpy>=1.21.0"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "python -m pip install PyQt5>=5.15.0 matplotlib>=3.5.0 scikit-learn>=1.1.0"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "python -m pip install requests>=2.28.0 python-telegram-bot>=20.0 schedule>=1.2.0"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "python -m pip install python-dotenv>=0.19.0 configparser>=5.3.0 numba>=0.56.0 cython>=0.29.0"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "echo \"Creating directories...\""
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "mkdir -p AuraTrade/logs AuraTrade/data/cache AuraTrade/reports AuraTrade/config AuraTrade/exports AuraTrade/backups"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "echo \"Setting up environment file...\""
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "if [ ! -f .env ]; then cp .env.example .env && echo \"📋 .env file created. Please edit with your MT5 credentials.\"; fi"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "echo \"🎯 Starting AuraTrade Bot...\""
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
