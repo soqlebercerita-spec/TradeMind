@@ -1,606 +1,403 @@
-
 """
 Machine Learning Engine for AuraTrade Bot
-Basic ML models for pattern recognition and signal enhancement
+Advanced ML predictions and signal generation
 """
 
 import pandas as pd
 import numpy as np
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Any, Tuple
 from datetime import datetime, timedelta
-from sklearn.preprocessing import StandardScaler
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import accuracy_score
 import pickle
 import os
+from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
+from sklearn.preprocessing import StandardScaler
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import accuracy_score, classification_report
+import warnings
+warnings.filterwarnings('ignore')
+
 from utils.logger import Logger
 
 class MLEngine:
-    """Machine Learning engine for trading signal enhancement"""
-    
+    """Machine Learning prediction engine"""
+
     def __init__(self):
         self.logger = Logger().get_logger()
-        self.models = {}
-        self.scalers = {}
-        self.training_data = {}
-        self.model_performance = {}
-        
-        # Initialize basic models
-        self._initialize_models()
-        
-        self.logger.info("ML Engine initialized")
-    
-    def _initialize_models(self):
-        """Initialize ML models"""
-        try:
-            # Signal Classification Model
-            self.models['signal_classifier'] = RandomForestClassifier(
-                n_estimators=100,
-                random_state=42,
-                max_depth=10
-            )
-            
-            # Price Direction Model
-            self.models['price_direction'] = LogisticRegression(
-                random_state=42,
-                max_iter=1000
-            )
-            
-            # Signal Strength Model
-            self.models['signal_strength'] = RandomForestClassifier(
-                n_estimators=50,
-                random_state=42,
-                max_depth=8
-            )
-            
-            # Initialize scalers
-            for model_name in self.models.keys():
-                self.scalers[model_name] = StandardScaler()
-                
-        except Exception as e:
-            self.logger.error(f"Error initializing ML models: {e}")
-    
-    def prepare_features(self, rates: pd.DataFrame, indicators: Dict) -> np.ndarray:
+
+        # Models
+        self.direction_model = None
+        self.volatility_model = None
+        self.scaler = StandardScaler()
+
+        # Model parameters
+        self.lookback_period = 100
+        self.prediction_horizon = 10
+        self.min_confidence = 0.65
+
+        # Feature engineering
+        self.features = [
+            'rsi', 'macd', 'bb_upper', 'bb_lower', 'ema_fast', 'ema_slow',
+            'volume_ma', 'price_change', 'volatility', 'momentum'
+        ]
+
+        # Model paths
+        self.model_dir = 'AuraTrade/data/models'
+        os.makedirs(self.model_dir, exist_ok=True)
+
+        self.logger.info("MLEngine initialized")
+
+    def prepare_features(self, df: pd.DataFrame) -> pd.DataFrame:
         """Prepare features for ML models"""
         try:
-            if len(rates) < 20:
-                return np.array([])
-            
-            features = []
-            
+            if len(df) < 50:
+                return pd.DataFrame()
+
+            features_df = df.copy()
+
+            # Technical indicators
+            features_df['rsi'] = self._calculate_rsi(df['close'])
+            features_df['macd'], features_df['macd_signal'] = self._calculate_macd(df['close'])
+            features_df['bb_upper'], features_df['bb_middle'], features_df['bb_lower'] = self._calculate_bollinger_bands(df['close'])
+            features_df['ema_fast'] = df['close'].ewm(span=12).mean()
+            features_df['ema_slow'] = df['close'].ewm(span=26).mean()
+
+            # Volume indicators
+            features_df['volume_ma'] = df['tick_volume'].rolling(window=20).mean()
+            features_df['volume_ratio'] = df['tick_volume'] / features_df['volume_ma']
+
             # Price-based features
-            current_price = rates['close'].iloc[-1]
-            price_change_1 = (rates['close'].iloc[-1] - rates['close'].iloc[-2]) / rates['close'].iloc[-2]
-            price_change_5 = (rates['close'].iloc[-1] - rates['close'].iloc[-6]) / rates['close'].iloc[-6]
-            price_change_20 = (rates['close'].iloc[-1] - rates['close'].iloc[-21]) / rates['close'].iloc[-21]
-            
-            features.extend([price_change_1, price_change_5, price_change_20])
-            
-            # Volume features (if available)
-            if 'tick_volume' in rates.columns:
-                volume_ratio = rates['tick_volume'].iloc[-1] / rates['tick_volume'].tail(20).mean()
-                features.append(volume_ratio)
-            else:
-                features.append(1.0)  # Default volume ratio
-            
-            # Technical indicator features
-            if 'rsi' in indicators:
-                rsi = indicators['rsi'].iloc[-1] if hasattr(indicators['rsi'], 'iloc') else indicators['rsi']
-                features.append(rsi / 100.0)  # Normalize RSI
-            else:
-                features.append(0.5)
-            
-            if 'macd_line' in indicators and 'macd_signal' in indicators:
-                macd_diff = (indicators['macd_line'].iloc[-1] - indicators['macd_signal'].iloc[-1]) if hasattr(indicators['macd_line'], 'iloc') else 0
-                features.append(macd_diff)
-            else:
-                features.append(0.0)
-            
-            # Moving average features
-            if len(rates) >= 20:
-                ma_20 = rates['close'].tail(20).mean()
-                ma_ratio = current_price / ma_20
-                features.append(ma_ratio)
-            else:
-                features.append(1.0)
-            
-            # Bollinger Band position
-            if 'bb_upper' in indicators and 'bb_lower' in indicators:
-                bb_upper = indicators['bb_upper'].iloc[-1] if hasattr(indicators['bb_upper'], 'iloc') else current_price * 1.02
-                bb_lower = indicators['bb_lower'].iloc[-1] if hasattr(indicators['bb_lower'], 'iloc') else current_price * 0.98
-                bb_position = (current_price - bb_lower) / (bb_upper - bb_lower) if bb_upper != bb_lower else 0.5
-                features.append(bb_position)
-            else:
-                features.append(0.5)
-            
+            features_df['price_change'] = df['close'].pct_change()
+            features_df['high_low_ratio'] = (df['high'] - df['low']) / df['close']
+            features_df['open_close_ratio'] = (df['close'] - df['open']) / df['open']
+
+            # Volatility
+            features_df['volatility'] = features_df['price_change'].rolling(window=20).std()
+
+            # Momentum
+            features_df['momentum'] = df['close'].pct_change(periods=10)
+
+            # Trend indicators
+            features_df['trend_strength'] = (features_df['ema_fast'] - features_df['ema_slow']) / features_df['ema_slow']
+
+            # Support/Resistance levels
+            features_df['resistance_level'] = df['high'].rolling(window=20).max()
+            features_df['support_level'] = df['low'].rolling(window=20).min()
+            features_df['price_position'] = (df['close'] - features_df['support_level']) / (features_df['resistance_level'] - features_df['support_level'])
+
             # Time-based features
-            now = datetime.now()
-            hour_of_day = now.hour / 24.0
-            day_of_week = now.weekday() / 6.0
-            features.extend([hour_of_day, day_of_week])
-            
-            # Volatility features
-            if len(rates) >= 10:
-                volatility = rates['close'].tail(10).std() / rates['close'].tail(10).mean()
-                features.append(volatility)
-            else:
-                features.append(0.01)
-            
-            return np.array(features).reshape(1, -1)
-            
+            features_df['hour'] = df.index.hour
+            features_df['day_of_week'] = df.index.dayofweek
+
+            # Drop NaN values
+            features_df = features_df.dropna()
+
+            return features_df
+
         except Exception as e:
             self.logger.error(f"Error preparing features: {e}")
-            return np.array([]).reshape(1, -1)
-    
-    def enhance_signals(self, signals: List[Dict], rates: pd.DataFrame, indicators: Dict) -> List[Dict]:
-        """Enhance trading signals using ML models"""
+            return pd.DataFrame()
+
+    def _calculate_rsi(self, prices: pd.Series, period: int = 14) -> pd.Series:
+        """Calculate RSI"""
         try:
-            if not signals:
-                return signals
-            
-            enhanced_signals = []
-            features = self.prepare_features(rates, indicators)
-            
-            if features.size == 0:
-                return signals
-            
-            for signal in signals:
-                enhanced_signal = signal.copy()
-                
-                # Get ML predictions
-                ml_predictions = self._get_ml_predictions(features)
-                
-                # Enhance confidence
-                original_confidence = signal.get('confidence', 0.5)
-                ml_confidence = ml_predictions.get('signal_strength', 0.5)
-                
-                # Combine original and ML confidence
-                combined_confidence = (original_confidence * 0.7) + (ml_confidence * 0.3)
-                enhanced_signal['confidence'] = min(1.0, combined_confidence)
-                
-                # Add ML-based adjustments
-                enhanced_signal['ml_enhancement'] = {
-                    'original_confidence': original_confidence,
-                    'ml_confidence': ml_confidence,
-                    'price_direction_prob': ml_predictions.get('price_direction', 0.5),
-                    'signal_quality': ml_predictions.get('signal_quality', 'medium')
-                }
-                
-                # Adjust signal strength based on ML predictions
-                if ml_predictions.get('signal_quality') == 'strong':
-                    enhanced_signal['confidence'] = min(1.0, enhanced_signal['confidence'] * 1.1)
-                elif ml_predictions.get('signal_quality') == 'weak':
-                    enhanced_signal['confidence'] = enhanced_signal['confidence'] * 0.9
-                
-                enhanced_signals.append(enhanced_signal)
-            
-            return enhanced_signals
-            
+            delta = prices.diff()
+            gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
+            loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
+            rs = gain / loss
+            return 100 - (100 / (1 + rs))
+        except:
+            return pd.Series(index=prices.index, dtype=float)
+
+    def _calculate_macd(self, prices: pd.Series, fast: int = 12, slow: int = 26, signal: int = 9) -> Tuple[pd.Series, pd.Series]:
+        """Calculate MACD"""
+        try:
+            ema_fast = prices.ewm(span=fast).mean()
+            ema_slow = prices.ewm(span=slow).mean()
+            macd = ema_fast - ema_slow
+            macd_signal = macd.ewm(span=signal).mean()
+            return macd, macd_signal
+        except:
+            return pd.Series(index=prices.index, dtype=float), pd.Series(index=prices.index, dtype=float)
+
+    def _calculate_bollinger_bands(self, prices: pd.Series, period: int = 20, std_dev: int = 2) -> Tuple[pd.Series, pd.Series, pd.Series]:
+        """Calculate Bollinger Bands"""
+        try:
+            sma = prices.rolling(window=period).mean()
+            std = prices.rolling(window=period).std()
+            upper_band = sma + (std * std_dev)
+            lower_band = sma - (std * std_dev)
+            return upper_band, sma, lower_band
+        except:
+            empty_series = pd.Series(index=prices.index, dtype=float)
+            return empty_series, empty_series, empty_series
+
+    def create_labels(self, df: pd.DataFrame, horizon: int = 10) -> pd.Series:
+        """Create labels for supervised learning"""
+        try:
+            future_prices = df['close'].shift(-horizon)
+            current_prices = df['close']
+
+            # Create direction labels (0: down, 1: up)
+            price_change = (future_prices - current_prices) / current_prices
+            labels = (price_change > 0.001).astype(int)  # 0.1% threshold
+
+            return labels
+
         except Exception as e:
-            self.logger.error(f"Error enhancing signals: {e}")
-            return signals
-    
-    def _get_ml_predictions(self, features: np.ndarray) -> Dict[str, any]:
-        """Get predictions from ML models"""
+            self.logger.error(f"Error creating labels: {e}")
+            return pd.Series()
+
+    def train_models(self, df: pd.DataFrame) -> bool:
+        """Train ML models"""
         try:
-            predictions = {}
-            
-            # Use simple heuristics if models are not trained
-            if features.size > 0:
-                # Simple signal strength prediction
-                feature_sum = np.sum(features)
-                signal_strength = min(1.0, max(0.0, (feature_sum + 5) / 10))  # Normalize to 0-1
-                predictions['signal_strength'] = signal_strength
-                
-                # Simple price direction prediction
-                price_direction = 0.6 if feature_sum > 0 else 0.4
-                predictions['price_direction'] = price_direction
-                
-                # Signal quality assessment
-                if signal_strength > 0.7:
-                    predictions['signal_quality'] = 'strong'
-                elif signal_strength > 0.4:
-                    predictions['signal_quality'] = 'medium'
-                else:
-                    predictions['signal_quality'] = 'weak'
-            else:
-                predictions = {
-                    'signal_strength': 0.5,
-                    'price_direction': 0.5,
-                    'signal_quality': 'medium'
-                }
-            
-            return predictions
-            
-        except Exception as e:
-            self.logger.error(f"Error getting ML predictions: {e}")
-            return {'signal_strength': 0.5, 'price_direction': 0.5, 'signal_quality': 'medium'}
-    
-    def train_models(self, historical_data: pd.DataFrame, signals_history: List[Dict]) -> Dict[str, float]:
-        """Train ML models with historical data"""
-        try:
-            if len(historical_data) < 100 or len(signals_history) < 50:
-                self.logger.warning("Insufficient data for ML training")
-                return {'status': 'insufficient_data'}
-            
-            # Prepare training data
-            training_features = []
-            training_labels = []
-            
-            # This is a simplified training process
-            # In a real implementation, you would need proper feature engineering
-            # and label preparation based on actual trading results
-            
-            for i, signal in enumerate(signals_history[-50:]):  # Use last 50 signals
-                if i + 20 < len(historical_data):
-                    # Use historical data at signal time
-                    signal_time_data = historical_data.iloc[i:i+20]
-                    
-                    # Simple feature extraction
-                    features = [
-                        signal.get('confidence', 0.5),
-                        len(signal.get('reason', '')),
-                        1.0 if signal.get('action') == 'buy' else 0.0
-                    ]
-                    
-                    # Simple label (whether signal was "successful")
-                    # This is a placeholder - real implementation would use actual trade results
-                    label = 1 if signal.get('confidence', 0) > 0.7 else 0
-                    
-                    training_features.append(features)
-                    training_labels.append(label)
-            
-            if len(training_features) < 10:
-                return {'status': 'insufficient_training_data'}
-            
-            # Convert to numpy arrays
-            X = np.array(training_features)
-            y = np.array(training_labels)
-            
-            # Train a simple model
-            try:
-                from sklearn.ensemble import RandomForestClassifier
-                simple_model = RandomForestClassifier(n_estimators=10, random_state=42)
-                simple_model.fit(X, y)
-                
-                # Calculate accuracy (simplified)
-                predictions = simple_model.predict(X)
-                accuracy = accuracy_score(y, predictions)
-                
-                # Store the simple model
-                self.models['simple_classifier'] = simple_model
-                
-                return {
-                    'status': 'success',
-                    'accuracy': accuracy,
-                    'samples_trained': len(X)
-                }
-                
-            except ImportError:
-                self.logger.warning("sklearn not available, using basic ML simulation")
-                return {
-                    'status': 'simulated',
-                    'accuracy': 0.65,  # Simulated accuracy
-                    'samples_trained': len(X)
-                }
-            
+            self.logger.info("Training ML models...")
+
+            # Prepare features
+            features_df = self.prepare_features(df)
+            if features_df.empty:
+                self.logger.error("No features prepared for training")
+                return False
+
+            # Create labels
+            labels = self.create_labels(features_df, self.prediction_horizon)
+
+            # Align features and labels
+            min_length = min(len(features_df), len(labels))
+            features_df = features_df.iloc[:min_length]
+            labels = labels.iloc[:min_length]
+
+            # Remove NaN values
+            mask = ~(features_df.isnull().any(axis=1) | labels.isnull())
+            features_df = features_df[mask]
+            labels = labels[mask]
+
+            if len(features_df) < 100:
+                self.logger.warning("Insufficient data for training")
+                return False
+
+            # Select features
+            feature_columns = [col for col in self.features if col in features_df.columns]
+            X = features_df[feature_columns].values
+            y = labels.values
+
+            # Scale features
+            X_scaled = self.scaler.fit_transform(X)
+
+            # Split data
+            X_train, X_test, y_train, y_test = train_test_split(
+                X_scaled, y, test_size=0.2, random_state=42, stratify=y
+            )
+
+            # Train direction model
+            self.direction_model = RandomForestClassifier(
+                n_estimators=100,
+                max_depth=10,
+                random_state=42,
+                class_weight='balanced'
+            )
+            self.direction_model.fit(X_train, y_train)
+
+            # Evaluate model
+            y_pred = self.direction_model.predict(X_test)
+            accuracy = accuracy_score(y_test, y_pred)
+
+            self.logger.info(f"Direction model accuracy: {accuracy:.3f}")
+
+            # Train volatility model (predict if next period will be high volatility)
+            volatility_labels = self._create_volatility_labels(features_df)
+            if len(volatility_labels) > 0:
+                vol_mask = ~volatility_labels.isnull()
+                X_vol = X_scaled[vol_mask]
+                y_vol = volatility_labels[vol_mask].values
+
+                if len(np.unique(y_vol)) > 1:
+                    X_vol_train, X_vol_test, y_vol_train, y_vol_test = train_test_split(
+                        X_vol, y_vol, test_size=0.2, random_state=42
+                    )
+
+                    self.volatility_model = GradientBoostingClassifier(
+                        n_estimators=50,
+                        max_depth=5,
+                        random_state=42
+                    )
+                    self.volatility_model.fit(X_vol_train, y_vol_train)
+
+                    vol_accuracy = accuracy_score(y_vol_test, self.volatility_model.predict(X_vol_test))
+                    self.logger.info(f"Volatility model accuracy: {vol_accuracy:.3f}")
+
+            # Save models
+            self._save_models()
+
+            return True
+
         except Exception as e:
             self.logger.error(f"Error training models: {e}")
-            return {'status': 'error', 'error': str(e)}
-    
-    def predict_market_direction(self, rates: pd.DataFrame, indicators: Dict) -> Dict[str, any]:
-        """Predict market direction using ML"""
+            return False
+
+    def _create_volatility_labels(self, df: pd.DataFrame) -> pd.Series:
+        """Create volatility labels"""
         try:
-            features = self.prepare_features(rates, indicators)
-            
-            if features.size == 0:
-                return {'direction': 'NEUTRAL', 'confidence': 0.5, 'method': 'default'}
-            
-            # Simple prediction logic
-            feature_sum = np.sum(features)
-            
-            if feature_sum > 0.1:
-                direction = 'BULLISH'
-                confidence = min(0.8, 0.5 + abs(feature_sum) * 0.1)
-            elif feature_sum < -0.1:
-                direction = 'BEARISH'
-                confidence = min(0.8, 0.5 + abs(feature_sum) * 0.1)
+            volatility = df['volatility']
+            high_vol_threshold = volatility.quantile(0.7)
+            return (volatility > high_vol_threshold).astype(int)
+        except:
+            return pd.Series()
+
+    def predict_direction(self, df: pd.DataFrame) -> Dict[str, Any]:
+        """Predict price direction"""
+        try:
+            if self.direction_model is None:
+                return {'prediction': 0, 'confidence': 0.0, 'signal': 'HOLD'}
+
+            # Prepare features
+            features_df = self.prepare_features(df)
+            if features_df.empty:
+                return {'prediction': 0, 'confidence': 0.0, 'signal': 'HOLD'}
+
+            # Get latest features
+            latest_features = features_df.iloc[-1]
+            feature_columns = [col for col in self.features if col in features_df.columns]
+            X = latest_features[feature_columns].values.reshape(1, -1)
+
+            # Scale features
+            X_scaled = self.scaler.transform(X)
+
+            # Make prediction
+            prediction = self.direction_model.predict(X_scaled)[0]
+            probabilities = self.direction_model.predict_proba(X_scaled)[0]
+            confidence = max(probabilities)
+
+            # Generate signal
+            if confidence >= self.min_confidence:
+                signal = 'BUY' if prediction == 1 else 'SELL'
             else:
-                direction = 'NEUTRAL'
-                confidence = 0.5
-            
+                signal = 'HOLD'
+
             return {
-                'direction': direction,
-                'confidence': confidence,
-                'method': 'ml_enhanced',
-                'feature_score': feature_sum,
-                'timestamp': datetime.now()
+                'prediction': int(prediction),
+                'confidence': float(confidence),
+                'signal': signal,
+                'probabilities': {
+                    'down': float(probabilities[0]),
+                    'up': float(probabilities[1])
+                }
             }
-            
+
         except Exception as e:
-            self.logger.error(f"Error predicting market direction: {e}")
-            return {'direction': 'NEUTRAL', 'confidence': 0.5, 'method': 'error'}
-    
-    def analyze_pattern_probability(self, rates: pd.DataFrame, pattern_name: str) -> float:
-        """Analyze probability of pattern success"""
+            self.logger.error(f"Error predicting direction: {e}")
+            return {'prediction': 0, 'confidence': 0.0, 'signal': 'HOLD'}
+
+    def predict_volatility(self, df: pd.DataFrame) -> Dict[str, Any]:
+        """Predict volatility level"""
         try:
-            # This is a simplified pattern probability analysis
-            # Real implementation would use historical pattern success rates
-            
-            pattern_probabilities = {
-                'Doji': 0.6,
-                'Hammer': 0.7,
-                'Shooting Star': 0.7,
-                'Bullish Engulfing': 0.75,
-                'Bearish Engulfing': 0.75,
-                'Morning Star': 0.8,
-                'Evening Star': 0.8,
-                'Triangle': 0.65,
-                'Double Top': 0.7,
-                'Double Bottom': 0.7
+            if self.volatility_model is None:
+                return {'high_volatility': False, 'confidence': 0.0}
+
+            # Prepare features
+            features_df = self.prepare_features(df)
+            if features_df.empty:
+                return {'high_volatility': False, 'confidence': 0.0}
+
+            # Get latest features
+            latest_features = features_df.iloc[-1]
+            feature_columns = [col for col in self.features if col in features_df.columns]
+            X = latest_features[feature_columns].values.reshape(1, -1)
+
+            # Scale features
+            X_scaled = self.scaler.transform(X)
+
+            # Make prediction
+            prediction = self.volatility_model.predict(X_scaled)[0]
+            probabilities = self.volatility_model.predict_proba(X_scaled)[0]
+            confidence = max(probabilities)
+
+            return {
+                'high_volatility': bool(prediction),
+                'confidence': float(confidence),
+                'volatility_prob': float(probabilities[1])
             }
-            
-            base_probability = pattern_probabilities.get(pattern_name, 0.5)
-            
-            # Adjust based on current market conditions
-            if len(rates) >= 20:
-                volatility = rates['close'].tail(20).std() / rates['close'].tail(20).mean()
-                
-                # Higher volatility might affect pattern reliability
-                if volatility > 0.02:  # High volatility
-                    base_probability *= 0.9
-                elif volatility < 0.005:  # Low volatility
-                    base_probability *= 1.1
-            
-            return min(0.95, max(0.05, base_probability))
-            
+
         except Exception as e:
-            self.logger.error(f"Error analyzing pattern probability: {e}")
-            return 0.5
-    
-    def get_model_performance(self) -> Dict[str, any]:
-        """Get ML model performance metrics"""
-        return {
-            'models_loaded': len(self.models),
-            'training_status': 'simulated',  # Placeholder
-            'last_training': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            'accuracy_metrics': {
-                'signal_classifier': 0.68,
-                'price_direction': 0.62,
-                'signal_strength': 0.71
-            },
-            'feature_importance': {
-                'price_momentum': 0.25,
-                'rsi': 0.20,
-                'macd': 0.18,
-                'volume': 0.15,
-                'time_features': 0.12,
-                'volatility': 0.10
-            }
-        }
-    
-    def save_models(self, filepath: str = "models/"):
-        """Save trained models to disk"""
+            self.logger.error(f"Error predicting volatility: {e}")
+            return {'high_volatility': False, 'confidence': 0.0}
+
+    def get_feature_importance(self) -> Dict[str, float]:
+        """Get feature importance from direction model"""
         try:
-            if not os.path.exists(filepath):
-                os.makedirs(filepath)
-            
-            # Save models (placeholder implementation)
-            model_info = {
-                'saved_at': datetime.now().isoformat(),
-                'model_count': len(self.models),
-                'status': 'saved'
-            }
-            
-            with open(os.path.join(filepath, 'model_info.txt'), 'w') as f:
-                f.write(str(model_info))
-            
-            self.logger.info(f"Models saved to {filepath}")
-            return True
-            
+            if self.direction_model is None:
+                return {}
+
+            feature_columns = [col for col in self.features if col in self.direction_model.feature_names_in_]
+            importances = self.direction_model.feature_importances_
+
+            return dict(zip(feature_columns, importances))
+
+        except Exception as e:
+            self.logger.error(f"Error getting feature importance: {e}")
+            return {}
+
+    def _save_models(self):
+        """Save trained models"""
+        try:
+            if self.direction_model is not None:
+                with open(os.path.join(self.model_dir, 'direction_model.pkl'), 'wb') as f:
+                    pickle.dump(self.direction_model, f)
+
+            if self.volatility_model is not None:
+                with open(os.path.join(self.model_dir, 'volatility_model.pkl'), 'wb') as f:
+                    pickle.dump(self.volatility_model, f)
+
+            with open(os.path.join(self.model_dir, 'scaler.pkl'), 'wb') as f:
+                pickle.dump(self.scaler, f)
+
+            self.logger.info("Models saved successfully")
+
         except Exception as e:
             self.logger.error(f"Error saving models: {e}")
-            return False
-    
-    def load_models(self, filepath: str = "models/"):
-        """Load trained models from disk"""
+
+    def load_models(self) -> bool:
+        """Load saved models"""
         try:
-            if not os.path.exists(filepath):
-                self.logger.warning(f"Model directory {filepath} not found")
-                return False
-            
-            # Load models (placeholder implementation)
-            self.logger.info(f"Models loaded from {filepath}")
+            direction_model_path = os.path.join(self.model_dir, 'direction_model.pkl')
+            volatility_model_path = os.path.join(self.model_dir, 'volatility_model.pkl')
+            scaler_path = os.path.join(self.model_dir, 'scaler.pkl')
+
+            if os.path.exists(direction_model_path):
+                with open(direction_model_path, 'rb') as f:
+                    self.direction_model = pickle.load(f)
+
+            if os.path.exists(volatility_model_path):
+                with open(volatility_model_path, 'rb') as f:
+                    self.volatility_model = pickle.load(f)
+
+            if os.path.exists(scaler_path):
+                with open(scaler_path, 'rb') as f:
+                    self.scaler = pickle.load(f)
+
+            self.logger.info("Models loaded successfully")
             return True
-            
+
         except Exception as e:
             self.logger.error(f"Error loading models: {e}")
             return False
-"""
-Machine Learning Engine for AuraTrade Bot
-Signal enhancement and market prediction
-"""
 
-import pandas as pd
-import numpy as np
-from typing import Dict, List, Any, Optional
-from utils.logger import Logger
+    def retrain_with_new_data(self, df: pd.DataFrame) -> bool:
+        """Retrain models with new data"""
+        try:
+            self.logger.info("Retraining models with new data...")
+            return self.train_models(df)
 
-class MLEngine:
-    """Machine learning engine for signal enhancement"""
-    
-    def __init__(self):
-        self.logger = Logger().get_logger()
-        self.models = {}
-        self.enabled = False
-        
-        try:
-            # Try to import ML libraries
-            import sklearn
-            self.enabled = True
-            self.logger.info("ML Engine initialized successfully")
-        except ImportError:
-            self.logger.warning("ML libraries not available - ML engine disabled")
-    
-    def enhance_signals(self, signals: List[Dict], rates: pd.DataFrame, 
-                       indicators: Dict) -> List[Dict]:
-        """Enhance trading signals with ML predictions"""
-        if not self.enabled or not signals:
-            return signals
-        
-        try:
-            enhanced_signals = []
-            
-            for signal in signals:
-                # Apply basic signal filtering and enhancement
-                enhanced_signal = signal.copy()
-                
-                # Enhance confidence based on multiple factors
-                base_confidence = signal.get('confidence', 0.5)
-                
-                # Factor 1: Trend alignment
-                trend_factor = self._calculate_trend_factor(indicators)
-                
-                # Factor 2: Volume confirmation
-                volume_factor = self._calculate_volume_factor(rates)
-                
-                # Factor 3: Market conditions
-                market_factor = self._calculate_market_factor(rates)
-                
-                # Combined confidence
-                enhanced_confidence = base_confidence * trend_factor * volume_factor * market_factor
-                enhanced_confidence = min(1.0, max(0.0, enhanced_confidence))
-                
-                enhanced_signal['confidence'] = enhanced_confidence
-                enhanced_signal['ml_enhanced'] = True
-                
-                # Only keep signals with minimum confidence
-                if enhanced_confidence >= 0.6:
-                    enhanced_signals.append(enhanced_signal)
-            
-            return enhanced_signals
-            
         except Exception as e:
-            self.logger.error(f"Error enhancing signals: {e}")
-            return signals
-    
-    def _calculate_trend_factor(self, indicators: Dict) -> float:
-        """Calculate trend alignment factor"""
-        try:
-            # Simple trend analysis based on moving averages
-            sma_20 = indicators.get('sma_20', 0)
-            sma_50 = indicators.get('sma_50', 0)
-            
-            if sma_20 > sma_50:
-                return 1.1  # Slight boost for uptrend
-            elif sma_20 < sma_50:
-                return 0.9  # Slight reduction for downtrend
-            else:
-                return 1.0  # Neutral
-                
-        except Exception:
-            return 1.0
-    
-    def _calculate_volume_factor(self, rates: pd.DataFrame) -> float:
-        """Calculate volume confirmation factor"""
-        try:
-            if 'tick_volume' not in rates.columns or len(rates) < 10:
-                return 1.0
-            
-            recent_volume = rates['tick_volume'].tail(5).mean()
-            avg_volume = rates['tick_volume'].tail(20).mean()
-            
-            if recent_volume > avg_volume * 1.2:
-                return 1.1  # High volume confirmation
-            elif recent_volume < avg_volume * 0.8:
-                return 0.9  # Low volume warning
-            else:
-                return 1.0
-                
-        except Exception:
-            return 1.0
-    
-    def _calculate_market_factor(self, rates: pd.DataFrame) -> float:
-        """Calculate market conditions factor"""
-        try:
-            if len(rates) < 20:
-                return 1.0
-            
-            # Calculate volatility
-            returns = rates['close'].pct_change().tail(20)
-            volatility = returns.std()
-            
-            # Normal volatility range
-            if 0.005 <= volatility <= 0.02:
-                return 1.0  # Good conditions
-            elif volatility > 0.02:
-                return 0.8  # High volatility - reduce confidence
-            else:
-                return 0.9  # Low volatility - slightly reduce
-                
-        except Exception:
-            return 1.0
-    
-    def predict_market_direction(self, rates: pd.DataFrame, 
-                               indicators: Dict) -> Dict[str, Any]:
-        """Predict market direction using simple heuristics"""
-        try:
-            if len(rates) < 50:
-                return {'direction': 'NEUTRAL', 'confidence': 0.5}
-            
-            # Simple trend analysis
-            close_prices = rates['close'].values
-            short_ma = np.mean(close_prices[-10:])
-            long_ma = np.mean(close_prices[-30:])
-            
-            if short_ma > long_ma * 1.001:
-                direction = 'UP'
-                confidence = min(0.8, (short_ma - long_ma) / long_ma * 100)
-            elif short_ma < long_ma * 0.999:
-                direction = 'DOWN'
-                confidence = min(0.8, (long_ma - short_ma) / long_ma * 100)
-            else:
-                direction = 'NEUTRAL'
-                confidence = 0.5
-            
-            return {
-                'direction': direction,
-                'confidence': confidence,
-                'short_ma': short_ma,
-                'long_ma': long_ma
-            }
-            
-        except Exception as e:
-            self.logger.error(f"Error predicting market direction: {e}")
-            return {'direction': 'NEUTRAL', 'confidence': 0.5}
-    
-    def analyze_pattern(self, rates: pd.DataFrame) -> Dict[str, Any]:
-        """Analyze price patterns"""
-        try:
-            if len(rates) < 20:
-                return {'pattern': 'INSUFFICIENT_DATA', 'strength': 0.0}
-            
-            # Simple pattern detection
-            close_prices = rates['close'].values[-20:]
-            high_prices = rates['high'].values[-20:]
-            low_prices = rates['low'].values[-20:]
-            
-            # Check for breakout patterns
-            recent_high = np.max(high_prices[-5:])
-            previous_resistance = np.max(high_prices[-20:-5])
-            
-            if recent_high > previous_resistance * 1.001:
-                return {'pattern': 'BREAKOUT_UP', 'strength': 0.7}
-            
-            recent_low = np.min(low_prices[-5:])
-            previous_support = np.min(low_prices[-20:-5])
-            
-            if recent_low < previous_support * 0.999:
-                return {'pattern': 'BREAKOUT_DOWN', 'strength': 0.7}
-            
-            return {'pattern': 'CONSOLIDATION', 'strength': 0.5}
-            
-        except Exception as e:
-            self.logger.error(f"Error analyzing pattern: {e}")
-            return {'pattern': 'ERROR', 'strength': 0.0}
+            self.logger.error(f"Error retraining models: {e}")
+            return False
+
+    def get_model_status(self) -> Dict[str, Any]:
+        """Get model status information"""
+        return {
+            'direction_model_loaded': self.direction_model is not None,
+            'volatility_model_loaded': self.volatility_model is not None,
+            'scaler_loaded': hasattr(self.scaler, 'mean_'),
+            'min_confidence': self.min_confidence,
+            'prediction_horizon': self.prediction_horizon,
+            'features_count': len(self.features)
+        }

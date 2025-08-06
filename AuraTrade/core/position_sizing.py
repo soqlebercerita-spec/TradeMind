@@ -1,531 +1,401 @@
-
 """
-Position Sizing Module for AuraTrade Bot
-Advanced position sizing based on risk management and market conditions
+Position Sizing System for AuraTrade Bot
+Advanced position sizing with multiple algorithms
 """
 
 import math
-from typing import Dict, List, Optional, Any, Tuple
-from datetime import datetime
+import numpy as np
+from typing import Dict, Optional, Any
+from enum import Enum
 from core.mt5_connector import MT5Connector
-from core.risk_manager import RiskManager
-from utils.logger import Logger, log_error
-
-class PositionSizing:
-    """Advanced position sizing with multiple calculation methods"""
-    
-    def __init__(self, mt5_connector: MT5Connector, risk_manager: RiskManager):
-        self.logger = Logger().get_logger()
-        self.mt5_connector = mt5_connector
-        self.risk_manager = risk_manager
-        
-        # Position sizing parameters
-        self.sizing_params = {
-            'default_risk_percent': 1.0,     # 1% risk per trade
-            'min_volume': 0.01,              # Minimum lot size
-            'max_volume': 1.0,               # Maximum lot size
-            'volume_step': 0.01,             # Volume increment
-            'conservative_mode': True,       # Conservative sizing
-            'volatility_adjustment': True,   # Adjust for volatility
-            'correlation_adjustment': True,  # Adjust for correlation
-        }
-        
-        # Volatility tracking
-        self.symbol_volatility = {}
-        self.last_volatility_update = {}
-        
-        self.logger.info("Position Sizing module initialized")
-    
-    def calculate_position_size(self, symbol: str, stop_loss_pips: float, 
-                               risk_percent: float = None) -> float:
-        """Calculate optimal position size based on risk and market conditions"""
-        try:
-            # Use default risk if not specified
-            if risk_percent is None:
-                risk_percent = self.sizing_params['default_risk_percent']
-            
-            # Get account information
-            account_info = self.mt5_connector.get_account_info()
-            if not account_info:
-                self.logger.error("Cannot get account info for position sizing")
-                return 0.0
-            
-            # Get symbol information
-            symbol_info = self.mt5_connector.get_symbol_info(symbol)
-            if not symbol_info:
-                self.logger.error(f"Cannot get symbol info for {symbol}")
-                return 0.0
-            
-            # Basic position size calculation
-            base_volume = self._calculate_base_volume(
-                account_info, symbol_info, stop_loss_pips, risk_percent
-            )
-            
-            if base_volume <= 0:
-                return 0.0
-            
-            # Apply adjustments
-            adjusted_volume = base_volume
-            
-            # Volatility adjustment
-            if self.sizing_params['volatility_adjustment']:
-                vol_adjustment = self._get_volatility_adjustment(symbol)
-                adjusted_volume *= vol_adjustment
-            
-            # Correlation adjustment
-            if self.sizing_params['correlation_adjustment']:
-                corr_adjustment = self._get_correlation_adjustment(symbol)
-                adjusted_volume *= corr_adjustment
-            
-            # Conservative mode adjustment
-            if self.sizing_params['conservative_mode']:
-                adjusted_volume *= 0.8  # 20% reduction for safety
-            
-            # Normalize volume
-            final_volume = self._normalize_volume(adjusted_volume, symbol_info)
-            
-            self.logger.info(f"Position size for {symbol}: {final_volume:.2f} lots (Risk: {risk_percent}%, SL: {stop_loss_pips} pips)")
-            
-            return final_volume
-            
-        except Exception as e:
-            log_error("PositionSizing", f"Error calculating position size: {e}", e)
-            return 0.0
-    
-    def _calculate_base_volume(self, account_info: Dict, symbol_info: Dict, 
-                              stop_loss_pips: float, risk_percent: float) -> float:
-        """Calculate base position size using risk-based formula"""
-        try:
-            balance = account_info.get('balance', 0)
-            if balance <= 0:
-                return 0.0
-            
-            # Risk amount in account currency
-            risk_amount = balance * (risk_percent / 100.0)
-            
-            # Get pip value
-            pip_value = self._calculate_pip_value(symbol_info, balance)
-            if pip_value <= 0:
-                return 0.0
-            
-            # Calculate position size
-            # Volume = Risk Amount / (Stop Loss Pips × Pip Value)
-            volume = risk_amount / (stop_loss_pips * pip_value)
-            
-            return max(volume, 0.0)
-            
-        except Exception as e:
-            log_error("PositionSizing", f"Error in base volume calculation: {e}", e)
-            return 0.0
-    
-    def _calculate_pip_value(self, symbol_info: Dict, account_balance: float) -> float:
-        """Calculate pip value for position sizing"""
-        try:
-            symbol = symbol_info.get('symbol', '')
-            point = symbol_info.get('point', 0.0001)
-            contract_size = symbol_info.get('contract_size', 100000)
-            
-            # For JPY pairs, pip is 0.01, for others 0.0001
-            if 'JPY' in symbol:
-                pip_size = point * 100
-            else:
-                pip_size = point * 10
-            
-            # Pip value for 1 lot
-            pip_value = pip_size * contract_size
-            
-            # Convert to account currency if needed
-            # For now, assuming USD account
-            return pip_value
-            
-        except Exception as e:
-            log_error("PositionSizing", f"Error calculating pip value: {e}", e)
-            return 10.0  # Default fallback
-    
-    def _get_volatility_adjustment(self, symbol: str) -> float:
-        """Get volatility-based adjustment factor"""
-        try:
-            # Update volatility if needed
-            self._update_symbol_volatility(symbol)
-            
-            volatility = self.symbol_volatility.get(symbol, 1.0)
-            
-            # Adjust position size based on volatility
-            # Higher volatility = smaller position
-            if volatility > 2.0:
-                return 0.5  # High volatility - reduce by 50%
-            elif volatility > 1.5:
-                return 0.7  # Medium-high volatility - reduce by 30%
-            elif volatility > 1.0:
-                return 0.85  # Medium volatility - reduce by 15%
-            elif volatility < 0.5:
-                return 1.2  # Low volatility - increase by 20%
-            else:
-                return 1.0  # Normal volatility
-                
-        except Exception as e:
-            log_error("PositionSizing", f"Error getting volatility adjustment: {e}", e)
-            return 1.0
-    
-    def _update_symbol_volatility(self, symbol: str):
-        """Update volatility data for symbol"""
-        try:
-            current_time = datetime.now()
-            
-            # Check if update is needed (every 5 minutes)
-            if symbol in self.last_volatility_update:
-                time_diff = current_time - self.last_volatility_update[symbol]
-                if time_diff.total_seconds() < 300:  # 5 minutes
-                    return
-            
-            # Get historical data
-            rates = self.mt5_connector.get_rates(symbol, 1, 0, 50)  # 50 periods
-            if rates is None or len(rates) < 20:
-                return
-            
-            # Calculate volatility (standard deviation of returns)
-            returns = rates['close'].pct_change().dropna()
-            volatility = returns.std() * 100  # As percentage
-            
-            self.symbol_volatility[symbol] = volatility
-            self.last_volatility_update[symbol] = current_time
-            
-            self.logger.debug(f"Updated volatility for {symbol}: {volatility:.2f}%")
-            
-        except Exception as e:
-            log_error("PositionSizing", f"Error updating volatility for {symbol}: {e}", e)
-    
-    def _get_correlation_adjustment(self, symbol: str) -> float:
-        """Get correlation-based adjustment factor"""
-        try:
-            positions = self.mt5_connector.get_positions()
-            if not positions:
-                return 1.0
-            
-            # Define currency correlation groups
-            correlation_groups = {
-                'EUR_STRONG': ['EURUSD', 'EURJPY', 'EURGBP'],
-                'USD_STRONG': ['EURUSD', 'GBPUSD', 'USDJPY'],
-                'JPY_STRONG': ['USDJPY', 'EURJPY', 'GBPJPY'],
-                'COMMODITY': ['XAUUSD', 'XAGUSD', 'BTCUSD']
-            }
-            
-            # Count correlated positions
-            correlated_count = 0
-            for position in positions:
-                pos_symbol = position['symbol']
-                
-                # Check if current symbol and position symbol are in same group
-                for group_symbols in correlation_groups.values():
-                    if symbol in group_symbols and pos_symbol in group_symbols:
-                        correlated_count += 1
-                        break
-            
-            # Reduce position size based on correlation
-            if correlated_count >= 3:
-                return 0.3  # Strong correlation - reduce by 70%
-            elif correlated_count == 2:
-                return 0.5  # Medium correlation - reduce by 50%
-            elif correlated_count == 1:
-                return 0.7  # Some correlation - reduce by 30%
-            else:
-                return 1.0  # No correlation
-                
-        except Exception as e:
-            log_error("PositionSizing", f"Error getting correlation adjustment: {e}", e)
-            return 1.0
-    
-    def _normalize_volume(self, volume: float, symbol_info: Dict) -> float:
-        """Normalize volume to valid trading size"""
-        try:
-            min_volume = self.sizing_params['min_volume']
-            max_volume = self.sizing_params['max_volume']
-            volume_step = self.sizing_params['volume_step']
-            
-            # Apply min/max limits
-            volume = max(min_volume, min(volume, max_volume))
-            
-            # Round to valid step
-            volume = round(volume / volume_step) * volume_step
-            
-            # Ensure minimum volume
-            if volume < min_volume:
-                volume = min_volume
-            
-            return round(volume, 2)
-            
-        except Exception as e:
-            log_error("PositionSizing", f"Error normalizing volume: {e}", e)
-            return self.sizing_params['min_volume']
-    
-    def calculate_risk_for_volume(self, symbol: str, volume: float, 
-                                 stop_loss_pips: float) -> float:
-        """Calculate risk percentage for given volume and stop loss"""
-        try:
-            account_info = self.mt5_connector.get_account_info()
-            symbol_info = self.mt5_connector.get_symbol_info(symbol)
-            
-            if not account_info or not symbol_info:
-                return 0.0
-            
-            balance = account_info.get('balance', 0)
-            if balance <= 0:
-                return 0.0
-            
-            # Calculate pip value
-            pip_value = self._calculate_pip_value(symbol_info, balance)
-            
-            # Calculate risk amount
-            risk_amount = volume * stop_loss_pips * pip_value
-            
-            # Convert to percentage
-            risk_percent = (risk_amount / balance) * 100
-            
-            return risk_percent
-            
-        except Exception as e:
-            log_error("PositionSizing", f"Error calculating risk for volume: {e}", e)
-            return 0.0
-    
-    def get_optimal_volume_for_risk(self, symbol: str, target_risk_percent: float, 
-                                   stop_loss_pips: float) -> float:
-        """Get optimal volume for specific risk percentage"""
-        try:
-            # Calculate base volume for target risk
-            base_volume = self.calculate_position_size(symbol, stop_loss_pips, target_risk_percent)
-            
-            # Verify the actual risk
-            actual_risk = self.calculate_risk_for_volume(symbol, base_volume, stop_loss_pips)
-            
-            # Adjust if needed
-            if actual_risk > target_risk_percent * 1.1:  # 10% tolerance
-                adjustment_factor = target_risk_percent / actual_risk
-                base_volume *= adjustment_factor
-                
-                # Normalize again
-                symbol_info = self.mt5_connector.get_symbol_info(symbol)
-                if symbol_info:
-                    base_volume = self._normalize_volume(base_volume, symbol_info)
-            
-            return base_volume
-            
-        except Exception as e:
-            log_error("PositionSizing", f"Error getting optimal volume: {e}", e)
-            return 0.0
-    
-    def get_position_value(self, symbol: str, volume: float) -> Dict[str, float]:
-        """Get position value information"""
-        try:
-            symbol_info = self.mt5_connector.get_symbol_info(symbol)
-            tick = self.mt5_connector.get_tick(symbol)
-            
-            if not symbol_info or not tick:
-                return {}
-            
-            contract_size = symbol_info.get('contract_size', 100000)
-            current_price = tick.get('bid', 0)
-            
-            # Calculate position value
-            position_value = volume * contract_size
-            notional_value = position_value * current_price
-            
-            # Calculate pip value
-            pip_value = self._calculate_pip_value(symbol_info, 10000)  # Per $10k
-            position_pip_value = pip_value * volume
-            
-            return {
-                'volume': volume,
-                'position_value': position_value,
-                'notional_value': notional_value,
-                'pip_value': position_pip_value,
-                'current_price': current_price
-            }
-            
-        except Exception as e:
-            log_error("PositionSizing", f"Error getting position value: {e}", e)
-            return {}
-    
-    def update_sizing_parameters(self, new_params: Dict[str, Any]):
-        """Update position sizing parameters"""
-        try:
-            for key, value in new_params.items():
-                if key in self.sizing_params:
-                    old_value = self.sizing_params[key]
-                    self.sizing_params[key] = value
-                    self.logger.info(f"Sizing parameter {key} updated: {old_value} -> {value}")
-                else:
-                    self.logger.warning(f"Unknown sizing parameter: {key}")
-                    
-        except Exception as e:
-            log_error("PositionSizing", f"Error updating sizing parameters: {e}", e)
-    
-    def get_sizing_recommendation(self, symbol: str, stop_loss_pips: float) -> Dict[str, Any]:
-        """Get comprehensive position sizing recommendation"""
-        try:
-            # Calculate different risk levels
-            conservative_volume = self.calculate_position_size(symbol, stop_loss_pips, 0.5)
-            normal_volume = self.calculate_position_size(symbol, stop_loss_pips, 1.0)
-            aggressive_volume = self.calculate_position_size(symbol, stop_loss_pips, 2.0)
-            
-            # Get current market conditions
-            volatility = self.symbol_volatility.get(symbol, 1.0)
-            vol_adjustment = self._get_volatility_adjustment(symbol)
-            corr_adjustment = self._get_correlation_adjustment(symbol)
-            
-            recommendation = {
-                'symbol': symbol,
-                'stop_loss_pips': stop_loss_pips,
-                'volumes': {
-                    'conservative': conservative_volume,
-                    'normal': normal_volume,
-                    'aggressive': aggressive_volume
-                },
-                'recommended': normal_volume,  # Default recommendation
-                'market_conditions': {
-                    'volatility': volatility,
-                    'volatility_adjustment': vol_adjustment,
-                    'correlation_adjustment': corr_adjustment
-                },
-                'risk_analysis': {
-                    'conservative_risk': self.calculate_risk_for_volume(symbol, conservative_volume, stop_loss_pips),
-                    'normal_risk': self.calculate_risk_for_volume(symbol, normal_volume, stop_loss_pips),
-                    'aggressive_risk': self.calculate_risk_for_volume(symbol, aggressive_volume, stop_loss_pips)
-                }
-            }
-            
-            # Adjust recommendation based on conditions
-            if vol_adjustment < 0.7:  # High volatility
-                recommendation['recommended'] = conservative_volume
-                recommendation['reason'] = 'High volatility detected - using conservative sizing'
-            elif corr_adjustment < 0.7:  # High correlation
-                recommendation['recommended'] = conservative_volume
-                recommendation['reason'] = 'High correlation with existing positions - using conservative sizing'
-            else:
-                recommendation['reason'] = 'Normal market conditions - using standard sizing'
-            
-            return recommendation
-            
-        except Exception as e:
-            log_error("PositionSizing", f"Error getting sizing recommendation: {e}", e)
-            return {}
-"""
-Position Sizing Calculator for AuraTrade Bot
-Dynamic lot size calculation based on risk management
-"""
-
-from typing import Dict, Optional
 from utils.logger import Logger
 
+class SizingMethod(Enum):
+    FIXED = "fixed"
+    PERCENT_RISK = "percent_risk"
+    KELLY = "kelly"
+    VOLATILITY = "volatility"
+    MARTINGALE = "martingale"
+    ANTI_MARTINGALE = "anti_martingale"
+
 class PositionSizing:
-    """Dynamic position sizing based on risk management"""
-    
-    def __init__(self, mt5_connector):
+    """Advanced position sizing calculator"""
+
+    def __init__(self, mt5_connector: MT5Connector):
+        self.mt5 = mt5_connector
         self.logger = Logger().get_logger()
-        self.mt5_connector = mt5_connector
-        
+
         # Default settings
-        self.default_risk_percent = 1.0  # 1% risk per trade
+        self.method = SizingMethod.PERCENT_RISK
+        self.default_risk_percent = 1.0
         self.min_lot_size = 0.01
         self.max_lot_size = 10.0
-        
-        self.logger.info("Position Sizing initialized")
-    
-    def calculate_position_size(self, symbol: str, risk_percent: float = None, 
-                              stop_loss_pips: float = 20) -> float:
-        """Calculate optimal position size based on risk"""
+        self.kelly_lookback = 50
+        self.volatility_period = 20
+
+        self.logger.info("PositionSizing initialized")
+
+    def calculate_position_size(self, symbol: str, entry_price: float, 
+                              stop_loss: float, method: SizingMethod = None,
+                              risk_percent: float = None) -> float:
+        """Calculate optimal position size"""
         try:
+            if method is None:
+                method = self.method
+
             if risk_percent is None:
                 risk_percent = self.default_risk_percent
-            
-            # Get account info
-            account_info = self.mt5_connector.get_account_info()
-            if not account_info:
-                return self.min_lot_size
-            
-            balance = account_info.get('balance', 0)
-            if balance <= 0:
-                return self.min_lot_size
-            
-            # Calculate risk amount in USD
-            risk_amount = balance * (risk_percent / 100)
-            
-            # Get symbol info
-            symbol_info = self.mt5_connector.get_symbol_info(symbol)
-            if not symbol_info:
-                return self.min_lot_size
-            
-            # Calculate pip value
-            pip_value = self.calculate_pip_value(symbol)
-            if pip_value <= 0:
-                return self.min_lot_size
-            
-            # Calculate position size
-            # Position Size = Risk Amount / (Stop Loss in Pips * Pip Value)
-            calculated_size = risk_amount / (stop_loss_pips * pip_value)
-            
-            # Apply limits
-            calculated_size = max(self.min_lot_size, calculated_size)
-            calculated_size = min(self.max_lot_size, calculated_size)
-            
-            # Round to symbol's volume step
-            volume_step = symbol_info.get('volume_step', 0.01)
-            calculated_size = round(calculated_size / volume_step) * volume_step
-            
-            self.logger.info(f"Calculated position size for {symbol}: {calculated_size:.2f}")
-            return calculated_size
-            
+
+            if method == SizingMethod.FIXED:
+                return self._fixed_sizing(symbol)
+            elif method == SizingMethod.PERCENT_RISK:
+                return self._percent_risk_sizing(symbol, entry_price, stop_loss, risk_percent)
+            elif method == SizingMethod.KELLY:
+                return self._kelly_sizing(symbol, entry_price, stop_loss)
+            elif method == SizingMethod.VOLATILITY:
+                return self._volatility_sizing(symbol, risk_percent)
+            elif method == SizingMethod.MARTINGALE:
+                return self._martingale_sizing(symbol, risk_percent)
+            elif method == SizingMethod.ANTI_MARTINGALE:
+                return self._anti_martingale_sizing(symbol, risk_percent)
+            else:
+                return self._percent_risk_sizing(symbol, entry_price, stop_loss, risk_percent)
+
         except Exception as e:
             self.logger.error(f"Error calculating position size: {e}")
             return self.min_lot_size
-    
-    def calculate_pip_value(self, symbol: str) -> float:
-        """Calculate pip value for the symbol"""
+
+    def _fixed_sizing(self, symbol: str) -> float:
+        """Fixed lot size"""
+        return 0.01
+
+    def _percent_risk_sizing(self, symbol: str, entry_price: float, 
+                           stop_loss: float, risk_percent: float) -> float:
+        """Position sizing based on percent risk"""
         try:
-            symbol_info = self.mt5_connector.get_symbol_info(symbol)
+            account_info = self.mt5.get_account_info()
+            if not account_info:
+                return self.min_lot_size
+
+            balance = account_info['balance']
+            risk_amount = balance * (risk_percent / 100)
+
+            # Calculate risk per unit
+            risk_per_pip = abs(entry_price - stop_loss)
+            if risk_per_pip <= 0:
+                return self.min_lot_size
+
+            # Get symbol info
+            symbol_info = self.mt5.get_symbol_info(symbol)
             if not symbol_info:
-                return 1.0
-            
-            # Get current tick
-            tick = self.mt5_connector.get_tick(symbol)
-            if not tick:
-                return 1.0
-            
-            point = symbol_info.get('point', 0.00001)
-            contract_size = symbol_info.get('trade_contract_size', 100000)
-            
-            # For most forex pairs
-            if 'JPY' in symbol:
-                pip_value = (0.01 / tick.get('ask', 1)) * contract_size
-            elif 'XAU' in symbol or 'GOLD' in symbol:
-                pip_value = 0.1 * contract_size / 100
+                return self.min_lot_size
+
+            # Calculate pip value
+            pip_value = self._calculate_pip_value(symbol, 1.0)
+            if pip_value <= 0:
+                return self.min_lot_size
+
+            # Convert price difference to pips
+            digits = symbol_info['digits']
+            point = symbol_info['point']
+
+            if digits == 5 or digits == 3:
+                pips = risk_per_pip / (point * 10)
             else:
-                pip_value = (0.0001 / tick.get('ask', 1)) * contract_size
-            
-            return pip_value
-            
+                pips = risk_per_pip / point
+
+            # Calculate lot size
+            lot_size = risk_amount / (pips * pip_value)
+
+            return self._normalize_lot_size(symbol, lot_size)
+
         except Exception as e:
-            self.logger.error(f"Error calculating pip value for {symbol}: {e}")
-            return 1.0
-    
-    def get_recommended_lot_size(self, symbol: str, account_balance: float = None) -> float:
-        """Get recommended lot size based on account balance"""
+            self.logger.error(f"Error in percent risk sizing: {e}")
+            return self.min_lot_size
+
+    def _kelly_sizing(self, symbol: str, entry_price: float, stop_loss: float) -> float:
+        """Kelly criterion position sizing"""
         try:
-            if account_balance is None:
-                account_info = self.mt5_connector.get_account_info()
-                account_balance = account_info.get('balance', 0) if account_info else 0
-            
-            # Conservative lot sizing
-            if account_balance < 1000:
-                return 0.01
-            elif account_balance < 5000:
-                return 0.02
-            elif account_balance < 10000:
-                return 0.05
-            elif account_balance < 50000:
-                return 0.1
-            else:
-                return min(account_balance / 100000, 1.0)  # 1% of balance as max
-                
+            # Get recent trade history to calculate win rate and avg win/loss
+            history = self.mt5.get_order_history(days=30)
+
+            if len(history) < 10:  # Not enough data
+                return self._percent_risk_sizing(symbol, entry_price, stop_loss, 1.0)
+
+            wins = [trade for trade in history if trade.get('profit', 0) > 0]
+            losses = [trade for trade in history if trade.get('profit', 0) < 0]
+
+            if not wins or not losses:
+                return self._percent_risk_sizing(symbol, entry_price, stop_loss, 1.0)
+
+            win_rate = len(wins) / len(history)
+            avg_win = np.mean([trade['profit'] for trade in wins])
+            avg_loss = abs(np.mean([trade['profit'] for trade in losses]))
+
+            if avg_loss <= 0:
+                return self.min_lot_size
+
+            # Kelly formula: f = (bp - q) / b
+            # where b = avg_win/avg_loss, p = win_rate, q = 1-win_rate
+            b = avg_win / avg_loss
+            p = win_rate
+            q = 1 - win_rate
+
+            kelly_fraction = (b * p - q) / b
+
+            # Apply Kelly fraction (limited to max 25% for safety)
+            kelly_fraction = max(0, min(0.25, kelly_fraction))
+
+            # Convert to lot size
+            account_info = self.mt5.get_account_info()
+            if not account_info:
+                return self.min_lot_size
+
+            balance = account_info['balance']
+            risk_amount = balance * kelly_fraction
+
+            # Calculate lot size based on stop loss
+            risk_pips = abs(entry_price - stop_loss)
+            pip_value = self._calculate_pip_value(symbol, 1.0)
+
+            if risk_pips > 0 and pip_value > 0:
+                symbol_info = self.mt5.get_symbol_info(symbol)
+                if symbol_info:
+                    digits = symbol_info['digits']
+                    point = symbol_info['point']
+
+                    if digits == 5 or digits == 3:
+                        pips = risk_pips / (point * 10)
+                    else:
+                        pips = risk_pips / point
+
+                    lot_size = risk_amount / (pips * pip_value)
+                    return self._normalize_lot_size(symbol, lot_size)
+
+            return self.min_lot_size
+
         except Exception as e:
-            self.logger.error(f"Error getting recommended lot size: {e}")
-            return 0.01
+            self.logger.error(f"Error in Kelly sizing: {e}")
+            return self.min_lot_size
+
+    def _volatility_sizing(self, symbol: str, risk_percent: float) -> float:
+        """Volatility-based position sizing"""
+        try:
+            # Get historical data
+            rates = self.mt5.get_rates(symbol, 'H1', self.volatility_period * 24)
+            if rates is None or len(rates) < self.volatility_period:
+                return self._percent_risk_sizing(symbol, 0, 0, risk_percent)
+
+            # Calculate volatility (ATR)
+            high_low = rates['high'] - rates['low']
+            high_close = abs(rates['high'] - rates['close'].shift(1))
+            low_close = abs(rates['low'] - rates['close'].shift(1))
+
+            true_range = np.maximum(high_low, np.maximum(high_close, low_close))
+            atr = true_range.rolling(window=self.volatility_period).mean().iloc[-1]
+
+            if np.isnan(atr) or atr <= 0:
+                return self.min_lot_size
+
+            # Adjust position size based on volatility
+            # Higher volatility = smaller position
+            base_volatility = 0.001  # Base volatility assumption
+            volatility_ratio = base_volatility / atr
+
+            # Calculate base position size
+            account_info = self.mt5.get_account_info()
+            if not account_info:
+                return self.min_lot_size
+
+            balance = account_info['balance']
+            base_risk = balance * (risk_percent / 100)
+
+            # Adjust for volatility
+            adjusted_lot_size = (base_risk * volatility_ratio) / 1000  # Simplified calculation
+
+            return self._normalize_lot_size(symbol, adjusted_lot_size)
+
+        except Exception as e:
+            self.logger.error(f"Error in volatility sizing: {e}")
+            return self.min_lot_size
+
+    def _martingale_sizing(self, symbol: str, risk_percent: float) -> float:
+        """Martingale position sizing (increase after losses)"""
+        try:
+            # Get recent trades
+            history = self.mt5.get_order_history(days=7)
+
+            if not history:
+                return self._percent_risk_sizing(symbol, 0, 0, risk_percent)
+
+            # Count consecutive losses
+            consecutive_losses = 0
+            for trade in reversed(history):  # Most recent first
+                if trade.get('profit', 0) < 0:
+                    consecutive_losses += 1
+                else:
+                    break
+
+            # Increase size based on consecutive losses (limited for safety)
+            multiplier = min(2 ** consecutive_losses, 4)  # Max 4x
+            base_size = self._percent_risk_sizing(symbol, 0, 0, risk_percent)
+
+            return self._normalize_lot_size(symbol, base_size * multiplier)
+
+        except Exception as e:
+            self.logger.error(f"Error in Martingale sizing: {e}")
+            return self.min_lot_size
+
+    def _anti_martingale_sizing(self, symbol: str, risk_percent: float) -> float:
+        """Anti-Martingale position sizing (increase after wins)"""
+        try:
+            # Get recent trades
+            history = self.mt5.get_order_history(days=7)
+
+            if not history:
+                return self._percent_risk_sizing(symbol, 0, 0, risk_percent)
+
+            # Count consecutive wins
+            consecutive_wins = 0
+            for trade in reversed(history):  # Most recent first
+                if trade.get('profit', 0) > 0:
+                    consecutive_wins += 1
+                else:
+                    break
+
+            # Increase size based on consecutive wins (limited for safety)
+            multiplier = min(1 + (consecutive_wins * 0.2), 2)  # Max 2x
+            base_size = self._percent_risk_sizing(symbol, 0, 0, risk_percent)
+
+            return self._normalize_lot_size(symbol, base_size * multiplier)
+
+        except Exception as e:
+            self.logger.error(f"Error in Anti-Martingale sizing: {e}")
+            return self.min_lot_size
+
+    def _calculate_pip_value(self, symbol: str, volume: float) -> float:
+        """Calculate pip value"""
+        try:
+            symbol_info = self.mt5.get_symbol_info(symbol)
+            if not symbol_info:
+                return 0.0
+
+            contract_size = symbol_info['trade_contract_size']
+            point = symbol_info['point']
+            digits = symbol_info['digits']
+
+            # Calculate pip size
+            if digits == 5 or digits == 3:
+                pip_size = point * 10
+            else:
+                pip_size = point
+
+            # Calculate pip value
+            pip_value = volume * contract_size * pip_size
+
+            return pip_value
+
+        except Exception as e:
+            self.logger.error(f"Error calculating pip value: {e}")
+            return 0.0
+
+    def _normalize_lot_size(self, symbol: str, lot_size: float) -> float:
+        """Normalize lot size to symbol requirements"""
+        try:
+            symbol_info = self.mt5.get_symbol_info(symbol)
+            if not symbol_info:
+                return self.min_lot_size
+
+            min_lot = symbol_info['volume_min']
+            max_lot = symbol_info['volume_max']
+            lot_step = symbol_info['volume_step']
+
+            # Ensure within bounds
+            lot_size = max(min_lot, min(max_lot, lot_size))
+            lot_size = max(self.min_lot_size, min(self.max_lot_size, lot_size))
+
+            # Round to lot step
+            if lot_step > 0:
+                lot_size = round(lot_size / lot_step) * lot_step
+
+            return round(lot_size, 2)
+
+        except Exception as e:
+            self.logger.error(f"Error normalizing lot size: {e}")
+            return self.min_lot_size
+
+    def get_sizing_recommendation(self, symbol: str, strategy: str = "balanced") -> Dict[str, Any]:
+        """Get position sizing recommendations"""
+        try:
+            recommendations = {}
+
+            # Get symbol info
+            symbol_info = self.mt5.get_symbol_info(symbol)
+            if not symbol_info:
+                return recommendations
+
+            current_price = (symbol_info['bid'] + symbol_info['ask']) / 2
+
+            # Different strategies
+            if strategy == "conservative":
+                methods = [SizingMethod.FIXED, SizingMethod.PERCENT_RISK]
+                risk_percents = [0.5, 1.0]
+            elif strategy == "aggressive":
+                methods = [SizingMethod.KELLY, SizingMethod.VOLATILITY, SizingMethod.ANTI_MARTINGALE]
+                risk_percents = [2.0, 3.0]
+            else:  # balanced
+                methods = [SizingMethod.PERCENT_RISK, SizingMethod.VOLATILITY]
+                risk_percents = [1.0, 1.5]
+
+            # Calculate recommendations
+            for method in methods:
+                for risk_pct in risk_percents:
+                    key = f"{method.value}_{risk_pct}%"
+
+                    # Use reasonable stop loss for calculation
+                    stop_loss = current_price * 0.98 if method != SizingMethod.FIXED else 0
+
+                    lot_size = self.calculate_position_size(
+                        symbol, current_price, stop_loss, method, risk_pct
+                    )
+
+                    recommendations[key] = {
+                        'method': method.value,
+                        'risk_percent': risk_pct,
+                        'lot_size': lot_size,
+                        'risk_amount': self._calculate_risk_amount(symbol, lot_size, current_price, stop_loss)
+                    }
+
+            return recommendations
+
+        except Exception as e:
+            self.logger.error(f"Error getting sizing recommendations: {e}")
+            return {}
+
+    def _calculate_risk_amount(self, symbol: str, lot_size: float, 
+                              entry_price: float, stop_loss: float) -> float:
+        """Calculate risk amount in account currency"""
+        try:
+            if stop_loss <= 0:
+                return 0.0
+
+            price_diff = abs(entry_price - stop_loss)
+            pip_value = self._calculate_pip_value(symbol, lot_size)
+
+            symbol_info = self.mt5.get_symbol_info(symbol)
+            if symbol_info:
+                digits = symbol_info['digits']
+                point = symbol_info['point']
+
+                if digits == 5 or digits == 3:
+                    pips = price_diff / (point * 10)
+                else:
+                    pips = price_diff / point
+
+                return pips * pip_value
+
+            return 0.0
+
+        except Exception as e:
+            self.logger.error(f"Error calculating risk amount: {e}")
+            return 0.0
