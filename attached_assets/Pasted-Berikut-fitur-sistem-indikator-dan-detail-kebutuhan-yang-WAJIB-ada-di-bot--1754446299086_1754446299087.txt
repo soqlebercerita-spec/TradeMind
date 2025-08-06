@@ -1,0 +1,119 @@
+Berikut fitur, sistem, indikator, dan detail kebutuhan yang WAJIB ada di bot:
+
+
+
+# =========================
+# 🔧 TEKNIS DASAR
+# =========================
+- Bahasa: Python
+- Platform Trading: MetaTrader 5 (gunakan modul MetaTrader5)
+- Strategi Utama: Scalping (profit kecil tapi konsisten), Hybrid Arbitrage (eksekusi cepat saat ada lonjakan harga) 
+- Trading Symbol: Bisa DIISI MANUAL dari GUI (misalnya XAUUSD, EURUSD, BTCUSD, dll)
+- Timeframe default: M1 (bisa diganti di kode, antara lain menjadi M3, M5, M10, M15, M30, H1, H4, D1, D4, W1, W4, dst)
+ 
+
+# =========================
+# 🧠 STRATEGI TRADING
+# =========================
+Gunakan kombinasi indikator dan logika berikut:
+
+## 🔄 ENTRY SIGNAL
+- **Price Action cepat** (deteksi candle kuat seperti bullish engulfing, breakout)
+- **WMA5 Low dan High**
+- **WMA10 Low dan High** 
+- **EMA50** (Exponential Moving Average) → Konfirmasi arah trend
+- **RSI** (Relative Strength Index)
+  - Beli saat RSI < 30 (oversold) → kondisi bullish divergen
+  - Jual saat RSI > 70 (overbought) → kondisi bearish divergen
+- **Bollinger Bands**
+  - Buy ketika harga menyentuh lower band + konfirmasi RSI, EMA dan WMA serta median Bollinger Bands 
+  - Sell ketika harga menyentuh upper band + konfirmasi RSI, EMA dan WMA serta median Bollinger Bands 
+- **MACD** dan **Stochastic Oscillator** sebagai pendukung tambahan jika memungkinkan
+- Gunakan **kombinasi sinyal**, bukan tunggu semua indikator setuju
+
+## 🧠 LOGIKA ENTRY & EXIT
+- Entry jika 2+ sinyal mengonfirmasi arah
+- Gunakan price action + WMA pendek untuk eksekusi cepat 
+- Gunakan indikator lambat (EMA50, RSI) untuk validasi
+- Gunakan max 10 order aktif
+- Batasi open posisi hanya 1x per candle (jika memungkinkan)
+
+## ⚙️ TAKE PROFIT / STOP LOSS
+- Scalping TP: defaultnya 0.5% - 1% dari modal, tapi sediakan kolom input utk edit/input manual dalam bentuk pips, price, atau % 
+- Scalping SL: defaultnya 0.3% - 0.5% dari modal, tapi sediakan kolom input utk edit/input manual dalam bentuk pips, price, atau % 
+- Bisa diatur dari GUI:
+  - TP scalping (pips, price, atau %) -> setelah diinput/menggunakan TP default, langsung menunjukkan profit dalam satuan e-wallet, pips, dan %-nya
+  - SL scalping (pips, price, atau %) -> setelah diinput/menggunakan SL default, langsung menunjukkan loss dalam satuan e-wallet, pips, dan %-nya
+  - TP umum (pips, price, atau % dari modal)  -> setelah diinput/menggunakan TP default, langsung menunjukkan profit dalam satuan e-wallet, pips, dan %-nya
+  - SL umum (pips, price, atau % dari modal)  -> setelah diinput/menggunakan SL default, langsung menunjukkan loss dalam satuan e-wallet, pips, dan %-nya
+
+## 📉 RISK MANAGEMENT
+- Max Drawdown: 5% dari modal
+- Daily Max Loss: 5% (otomatis hentikan trading) 
+- Max Order Open: 10 per sesi
+- Auto Close jika sudah profit 10% dari modal awal
+- Anti-Lonjakan Harga: Deteksi candle > 2x ATR → jangan open posisi
+- Auto News Filter: Jika high-impact news akan rilis (opsional: integrasi kalender berita forex)
+
+
+
+# =========================
+# 📊 GUI TKINTER (Harus Lengkap)
+# =========================
+Gunakan tkinter dengan desain modern dan responsif. Isi GUI harus mencakup:
+
+1. **Dropdown/Entry Symbol Manual** ➜ agar user bisa masukkan pair trading (cth: XAUUSD, EURUSD, dll)
+2. **Input Setting:**
+   - Lot Size -> default: 0.01 
+   - TP (pips, price, atau %) Scalping -> setelah diinput manual/menggunakan TP default, langsung menunjukkan perhitungan profit dalam satuan e-wallet, pips, dan %-nya
+   - SL (pips, price, atau %) Scalping
+   - TP/SL umum (pips, price, atau %) setelah diinput manual/menggunakan TP default, langsung menunjukkan perhitungan profit/loss dalam satuan e-wallet, pips, dan %-nya
+   - Max Open Trade
+3. **Info Akun Live:**
+   - Balance
+   - Equity
+   - Free Margin
+   - Margin Level
+4. **Live Report:**
+   - Posisi terbuka sekarang
+   - Floating Profit/Loss real-time
+   - Jumlah order hari ini
+   - Profit/Loss dari closed order dalam hari tersebut 
+5. **Strategi Switcher:**
+   - Scalping
+   - Intraday
+   - Hybrid Arbitrage
+   - (gunakan ttk.Combobox)
+6. **Control Buttons:**
+   - START BOT
+   - STOP BOT
+   - CLOSE ALL ORDER
+7. **Live Log Area:** (gunakan ScrolledText) untuk tampilkan semua aktivitas bot (entry, exit, profit, error, dll)
+
+# =========================
+# 📁 FITUR FILE DAN LOG
+# =========================
+- Export semua log order ke:
+  - CSV File (terpisah BUY dan SELL)
+  - Ringkasan Harian (auto buat summary file setiap hari)
+- Save file log ke folder "logs"
+- Ringkasan profit/loss per sesi ditampilkan di GUI saat bot dihentikan
+
+# =========================
+# 🔔 TELEGRAM NOTIFICATION (opsional)
+# =========================
+- Kirim notifikasi saat:
+  - Bot mulai
+  - Open posisi
+  - Close posisi (beserta hasilnya)
+  - Bot berhenti (summary P/L)
+- Sertakan token dan chat ID sebagai variabel global (bisa diisi manual)
+
+# =========================
+# ⚠️ KEBUTUHAN KHUSUS
+# =========================
+- Jangan gunakan while True di thread utama (gunakan threading yang benar)
+- Jangan freeze GUI (bot tetap jalan tanpa GUI not responding)
+- Gunakan after() untuk update GUI live info
+- Gunakan try/except untuk semua koneksi ke MT5 agar tidak crash
+- Semua sistem HARUS berjalan sempurna tanpa error.
