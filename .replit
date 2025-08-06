@@ -2,7 +2,7 @@ run = "cd AuraTrade && python bot.py"
 modules = ["python-3.12"]
 [nix]
 channel = "stable-25_05"
-packages = ["glibcLocales"]
+packages = ["cairo", "ffmpeg-full", "freetype", "ghostscript", "glibcLocales", "gobject-introspection", "gtk3", "libcxx", "pkg-config", "qhull", "tcl", "tk"]
 
 [deployment]
 run = ["sh", "-c", "cd AuraTrade && python bot.py"]
@@ -69,7 +69,35 @@ args = "python -m pip install --upgrade pip setuptools wheel"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "python -m pip install -r requirements.txt --no-cache-dir"
+args = "python -m pip install colorlog>=6.7.0"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "python -m pip install MetaTrader5>=5.0.45"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "python -m pip install pandas>=1.5.0 numpy>=1.21.0"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "python -m pip install PyQt5>=5.15.0 matplotlib>=3.5.0"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "python -m pip install scikit-learn>=1.1.0"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "python -m pip install requests>=2.28.0 python-telegram-bot>=20.0 schedule>=1.2.0"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "python -m pip install python-dotenv>=0.19.0 configparser>=5.3.0"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "python -m pip install numba>=0.56.0 cython>=0.29.0"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
@@ -77,15 +105,7 @@ args = "echo \"Creating necessary directories...\""
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "mkdir -p AuraTrade/logs"
-
-[[workflows.workflow.tasks]]
-task = "shell.exec"
-args = "mkdir -p AuraTrade/data/cache"
-
-[[workflows.workflow.tasks]]
-task = "shell.exec"
-args = "mkdir -p AuraTrade/reports"
+args = "mkdir -p AuraTrade/logs AuraTrade/data/cache AuraTrade/reports"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
