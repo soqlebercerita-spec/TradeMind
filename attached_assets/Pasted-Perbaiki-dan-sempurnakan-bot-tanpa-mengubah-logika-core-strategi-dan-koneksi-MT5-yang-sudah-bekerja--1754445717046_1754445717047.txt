@@ -1,0 +1,141 @@
+Perbaiki dan sempurnakan bot tanpa mengubah logika core strategi dan koneksi MT5 yang sudah bekerja. Fokus pada:
+
+Melengkapi fungsi/variabel/module/class yang tidak terisi atau tidak aktif
+
+Menghilangkan bug/exception yang muncul
+
+Menyempurnakan GUI agar seluruh elemen bisa diklik dan sinkron dengan fungsinya
+
+Memastikan integrasi antara sistem, GUI, dan MT5 berjalan 100%
+
+✅ Fitur dan Sistem yang Sudah Saya Buat:
+🔁 Multi-Strategi
+Scalping cepat dan aman
+
+Intraday berdasarkan trend
+
+HFT (High Frequency Trading)
+
+Arbitrage Hybrid (on development)
+
+📊 Indikator yang Sudah Digunakan
+MA10 (Moving Average)
+
+EMA50 (Exponential MA)
+
+WMA (Weighted MA)
+
+RSI
+
+Bollinger Bands
+
+MACD
+
+Stochastic
+
+ATR
+
+Fibonacci Retracement (otomatis)
+
+Pivot Point (otomatis)
+
+Support & Resistance (otomatis)
+
+Candlestick Analysis (basic)
+
+Price Action sebagai trigger awal entry
+
+Trend Filter & Momentum Analyzer (built-in)
+
+📌 Logika Strategi
+Entry berdasarkan kombinasi sinyal cepat (price action, MA10) dan sinyal lambat (EMA50, RSI, dll)
+
+Tidak menunggu semua indikator setuju (menghindari delay)
+
+Auto SL/TP berdasarkan % risk & persentase dinamis
+
+Scalping deteksi lonjakan harga & news filter
+
+Daily max loss dan drawdown limit
+
+Limit order per sesi (maks. 10)
+
+Auto-close saat profit menyentuh target (mis. 10% modal)
+
+🧠 GUI (Tkinter)
+Harus menampilkan dan berfungsi dengan baik:
+
+Pilihan simbol (auto detect aktif dari MT5 Market Watch)
+
+Switch strategi (Scalping, Intraday, HFT, Arbitrage)
+
+SL/TP Settings (Scalping mode dan TP/SL umum)
+
+Live Data: Balance, Equity, Open P/L, Drawdown
+
+Trading Log Realtime
+
+Log per order (CSV Buy/Sell terpisah)
+
+Tombol Close Manual semua order
+
+Notifikasi ke Telegram
+
+Tombol Start/Stop Trading Bot
+
+Status koneksi MT5
+
+Real-time indikator dan sinyal yang digunakan
+
+Status dan logika strategi aktif
+
+⚙️ Permintaan Perbaikan
+Temukan dan perbaiki semua bagian yang:
+
+Tidak didefinisikan (variabel, fungsi, objek, modul)
+
+Belum dikaitkan dengan GUI
+
+Belum dihubungkan dengan MT5 secara realtime
+
+Masih error atau menyebabkan crash/thread stop
+
+GUI Harus:
+
+Dirapikan tampilannya (Grid/Frame/Layout)
+
+Dibuat responsif dan mudah digunakan
+
+Tidak ada tombol/fitur yang tidak aktif
+
+Semua input, dropdown, checkbox, tombol harus bekerja dan sinkron ke sistem
+
+Tersambung langsung ke backend logic & eksekusi trading
+
+MT5 Auto Symbol Detect:
+
+Buat agar bot bisa mendeteksi otomatis simbol aktif di Market Watch (misal: XAUUSDm)
+
+Bila simbol tidak aktif, tampilkan pesan error yang ramah
+
+Tambahkan dropdown pilihan simbol aktif dari Market Watch MT5
+
+Perbaikan Struktur File:
+
+Rapikan semua modul agar tidak ada fungsi/folder yang redundant
+
+Satukan kode bila memungkinkan (untuk mempermudah deploy)
+
+Gunakan threading yang aman dan tidak menyebabkan UI freeze
+
+📥 Output yang Diharapkan:
+File bot dalam 1 file .py final
+
+Semua fitur bekerja normal
+
+Tidak ada error saat run
+
+GUI rapi, mudah digunakan, dan menyatu dengan logika
+
+Bot bisa langsung digunakan untuk real trading atau simulasi dengan hasil konsisten
+
