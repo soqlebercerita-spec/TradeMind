@@ -1,0 +1,59 @@
+Tujuan Bot:
+
+Bot ini dibuat untuk menjalankan transaksi jual beli secara otomatis di platform MetaTrader 5 (MT5), berdasarkan analisis teknikal, logika strategi pasar, dan pengelolaan risiko.
+
+Dirancang untuk membantu trader mengambil keputusan cepat tanpa intervensi manual, dengan tetap memperhatikan keamanan modal.
+
+Arsitektur Umum:
+
+Bot berbasis Python, terhubung langsung ke MT5 melalui API resmi MetaTrader5.
+
+Antarmuka pengguna (GUI) dibangun menggunakan Tkinter untuk memberikan pengalaman visual interaktif dalam mengatur strategi, memantau performa, dan mengendalikan bot.
+
+Bot ini dijalankan dalam multi-threading untuk memastikan proses trading, GUI, dan notifikasi tetap responsif secara paralel.
+
+Sistem Kerja:
+
+Bot memuat simbol trading tertentu (misalnya XAUUSD atau XAUUSDm), memverifikasi apakah simbol aktif, dan melakukan inisialisasi data harga secara real-time.
+
+Data historis dan harga real-time digunakan untuk menjalankan logika analisis pasar yang mendeteksi sinyal beli atau jual.
+
+Bot membuat keputusan secara otonom dan mengeksekusi order langsung ke akun trading di MT5, dengan pengaturan volume, Take Profit, Stop Loss, dan pengelolaan posisi aktif.
+
+Manajemen Risiko & Eksekusi:
+
+Disusun untuk meminimalisir loss besar dan memaksimalkan konsistensi profit kecil (low-risk, high-frequency).
+
+Menghindari overtrade dengan membatasi jumlah order aktif dalam satu sesi trading.
+
+Mengintegrasikan parameter auto-close saat target profit tercapai atau saat mendeteksi anomali pasar.
+
+Antarmuka GUI:
+
+GUI memungkinkan pengguna mengatur parameter strategi, membuka dan menutup bot, melihat informasi akun, profit/loss berjalan, serta status indikator dan order aktif.
+
+Semua interaksi dilakukan melalui tombol, dropdown, input box, dan log visual di GUI.
+
+Otomatisasi dan Adaptasi:
+
+Bot disusun untuk dapat berjalan penuh secara otomatis tanpa input manual setelah konfigurasi awal.
+
+Mengandung deteksi kondisi pasar dan berita, serta mampu menyesuaikan strategi sesuai volatilitas dan tren.
+
+Integrasi dan Logging:
+
+Semua data transaksi dan aktivitas trading disimpan dalam file log dan CSV untuk kebutuhan monitoring, audit, dan evaluasi performa trading.
+
+Bot dapat terhubung ke Telegram (jika diaktifkan) untuk mengirimkan notifikasi trading secara real-time ke ponsel pengguna.
+
+Skalabilitas dan Perkembangan:
+
+Bot ini dibangun modular agar mudah di-upgrade dengan strategi baru, indikator tambahan, atau fitur berbasis AI seperti arbitrase dan prediksi tren.
+
+Kelemahan Umum yang Masih Diperbaiki:
+
+Beberapa elemen GUI masih belum optimal dan perlu dirapikan.
+
+Validasi simbol MT5 kadang gagal meski sudah ditambahkan ke Market Watch.
+
+Beberapa fitur baru seperti HFT dan analisis Fibonacci masih dalam tahap integrasi agar dapat bekerja secara otomatis.
