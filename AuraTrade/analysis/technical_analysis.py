@@ -1,7 +1,7 @@
 
 """
 Technical Analysis Module for AuraTrade Bot
-Implements all required technical indicators without TA-Lib
+Comprehensive technical indicators and trend analysis
 """
 
 import pandas as pd
@@ -11,39 +11,40 @@ from datetime import datetime, timedelta
 from utils.logger import Logger
 
 class TechnicalAnalysis:
-    """Complete technical analysis system without TA-Lib dependency"""
+    """Advanced technical analysis with multiple indicators"""
     
     def __init__(self):
         self.logger = Logger().get_logger()
         self.logger.info("Technical Analysis module initialized")
     
-    def analyze_trends(self, df: pd.DataFrame) -> Dict[str, Any]:
-        """Complete trend analysis with all indicators"""
+    def analyze_trends(self, rates: pd.DataFrame) -> Dict[str, Any]:
+        """Comprehensive trend analysis using multiple indicators"""
         try:
-            if df is None or len(df) < 50:
+            if rates is None or len(rates) < 50:
                 return self._get_default_analysis()
             
             # Calculate all indicators
             analysis = {
-                'ma10': self._calculate_ma(df, 10),
-                'ema50': self._calculate_ema(df, 50),
-                'bollinger': self._calculate_bollinger_bands(df),
-                'rsi': self._calculate_rsi(df),
-                'macd': self._calculate_macd(df),
-                'wma': self._calculate_wma(df, 20),
-                'stochastic': self._calculate_stochastic(df),
-                'atr': self._calculate_atr(df),
-                'fibonacci': self._calculate_fibonacci_levels(df),
-                'pivot_points': self._calculate_pivot_points(df),
-                'support_resistance': self._calculate_support_resistance(df)
+                'trend': self._determine_trend(rates),
+                'rsi': self._calculate_rsi(rates),
+                'macd': self._calculate_macd(rates),
+                'bollinger_position': self._calculate_bollinger_bands(rates),
+                'volume_trend': self._analyze_volume_trend(rates),
+                'moving_averages': self._calculate_moving_averages(rates),
+                'support_resistance': self._calculate_support_resistance(rates),
+                'momentum': self._calculate_momentum(rates),
+                'volatility': self._calculate_volatility(rates),
+                'fibonacci': self._calculate_fibonacci_levels(rates),
+                'pivot_points': self._calculate_pivot_points(rates),
+                'stochastic': self._calculate_stochastic(rates),
+                'atr': self._calculate_atr(rates),
+                'wma': self._calculate_wma(rates),
+                'timestamp': datetime.now()
             }
             
-            # Determine overall trend
-            analysis['trend'] = self._determine_trend(df, analysis)
-            analysis['momentum'] = self._calculate_momentum(df, analysis)
+            # Overall signal strength
             analysis['signal_strength'] = self._calculate_signal_strength(analysis)
-            analysis['bollinger_position'] = self._get_bollinger_position(df, analysis['bollinger'])
-            analysis['volume_trend'] = self._analyze_volume_trend(df)
+            analysis['market_condition'] = self._determine_market_condition(analysis)
             
             return analysis
             
@@ -51,402 +52,441 @@ class TechnicalAnalysis:
             self.logger.error(f"Error in trend analysis: {e}")
             return self._get_default_analysis()
     
-    def _calculate_ma(self, df: pd.DataFrame, period: int) -> float:
-        """Simple Moving Average"""
-        try:
-            return df['close'].rolling(window=period).mean().iloc[-1]
-        except:
-            return 0.0
+    def _get_default_analysis(self) -> Dict[str, Any]:
+        """Default analysis when calculation fails"""
+        return {
+            'trend': 'NEUTRAL',
+            'rsi': 50.0,
+            'macd': 0.0,
+            'bollinger_position': 'MIDDLE',
+            'volume_trend': 'NORMAL',
+            'signal_strength': 0.0,
+            'market_condition': 'SIDEWAYS',
+            'timestamp': datetime.now()
+        }
     
-    def _calculate_ema(self, df: pd.DataFrame, period: int) -> float:
-        """Exponential Moving Average"""
+    def _determine_trend(self, rates: pd.DataFrame) -> str:
+        """Determine overall trend using multiple timeframes"""
         try:
-            return df['close'].ewm(span=period).mean().iloc[-1]
-        except:
-            return 0.0
-    
-    def _calculate_wma(self, df: pd.DataFrame, period: int) -> float:
-        """Weighted Moving Average"""
-        try:
-            weights = np.arange(1, period + 1)
-            wma = df['close'].rolling(window=period).apply(
-                lambda prices: np.dot(prices, weights) / weights.sum(), raw=True
-            )
-            return wma.iloc[-1]
-        except:
-            return 0.0
-    
-    def _calculate_bollinger_bands(self, df: pd.DataFrame, period: int = 20, std: int = 2) -> Dict[str, float]:
-        """Bollinger Bands"""
-        try:
-            sma = df['close'].rolling(window=period).mean()
-            std_dev = df['close'].rolling(window=period).std()
+            closes = rates['close']
             
-            upper = sma + (std_dev * std)
-            lower = sma - (std_dev * std)
+            # Short-term trend (20 periods)
+            sma20 = closes.rolling(window=20).mean()
+            short_trend = "BULLISH" if closes.iloc[-1] > sma20.iloc[-1] else "BEARISH"
             
-            return {
-                'upper': upper.iloc[-1],
-                'middle': sma.iloc[-1],
-                'lower': lower.iloc[-1],
-                'bandwidth': ((upper.iloc[-1] - lower.iloc[-1]) / sma.iloc[-1]) * 100
-            }
-        except:
-            return {'upper': 0, 'middle': 0, 'lower': 0, 'bandwidth': 0}
+            # Medium-term trend (50 periods)
+            sma50 = closes.rolling(window=50).mean()
+            medium_trend = "BULLISH" if closes.iloc[-1] > sma50.iloc[-1] else "BEARISH"
+            
+            # Long-term trend direction
+            price_change = (closes.iloc[-1] - closes.iloc[-20]) / closes.iloc[-20] * 100
+            
+            if short_trend == medium_trend:
+                if abs(price_change) > 1.0:  # Strong trend
+                    return short_trend
+                else:
+                    return "WEAK_" + short_trend
+            
+            return "NEUTRAL"
+            
+        except Exception as e:
+            self.logger.error(f"Error determining trend: {e}")
+            return "NEUTRAL"
     
-    def _calculate_rsi(self, df: pd.DataFrame, period: int = 14) -> float:
-        """RSI Calculation"""
+    def _calculate_rsi(self, rates: pd.DataFrame, period: int = 14) -> float:
+        """Calculate Relative Strength Index"""
         try:
-            delta = df['close'].diff()
+            delta = rates['close'].diff()
             gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
             loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
             
             rs = gain / loss
             rsi = 100 - (100 / (1 + rs))
-            return rsi.iloc[-1]
-        except:
+            return float(rsi.iloc[-1])
+            
+        except Exception as e:
+            self.logger.error(f"Error calculating RSI: {e}")
             return 50.0
     
-    def _calculate_macd(self, df: pd.DataFrame, fast: int = 12, slow: int = 26, signal: int = 9) -> Dict[str, float]:
-        """MACD Calculation"""
+    def _calculate_macd(self, rates: pd.DataFrame) -> Dict[str, float]:
+        """Calculate MACD indicator"""
         try:
-            ema_fast = df['close'].ewm(span=fast).mean()
-            ema_slow = df['close'].ewm(span=slow).mean()
+            closes = rates['close']
             
-            macd_line = ema_fast - ema_slow
-            signal_line = macd_line.ewm(span=signal).mean()
+            # Calculate EMAs
+            ema12 = closes.ewm(span=12).mean()
+            ema26 = closes.ewm(span=26).mean()
+            
+            # MACD line
+            macd_line = ema12 - ema26
+            
+            # Signal line
+            signal_line = macd_line.ewm(span=9).mean()
+            
+            # Histogram
             histogram = macd_line - signal_line
             
             return {
-                'macd': macd_line.iloc[-1],
-                'signal': signal_line.iloc[-1],
-                'histogram': histogram.iloc[-1]
+                'macd': float(macd_line.iloc[-1]),
+                'signal': float(signal_line.iloc[-1]),
+                'histogram': float(histogram.iloc[-1])
             }
-        except:
-            return {'macd': 0, 'signal': 0, 'histogram': 0}
-    
-    def _calculate_stochastic(self, df: pd.DataFrame, k_period: int = 14, d_period: int = 3) -> Dict[str, float]:
-        """Stochastic Oscillator"""
-        try:
-            lowest_low = df['low'].rolling(window=k_period).min()
-            highest_high = df['high'].rolling(window=k_period).max()
             
-            k_percent = 100 * ((df['close'] - lowest_low) / (highest_high - lowest_low))
-            d_percent = k_percent.rolling(window=d_period).mean()
+        except Exception as e:
+            self.logger.error(f"Error calculating MACD: {e}")
+            return {'macd': 0.0, 'signal': 0.0, 'histogram': 0.0}
+    
+    def _calculate_bollinger_bands(self, rates: pd.DataFrame, period: int = 20) -> str:
+        """Calculate Bollinger Bands position"""
+        try:
+            closes = rates['close']
+            sma = closes.rolling(window=period).mean()
+            std = closes.rolling(window=period).std()
+            
+            upper_band = sma + (std * 2)
+            lower_band = sma - (std * 2)
+            
+            current_price = closes.iloc[-1]
+            current_upper = upper_band.iloc[-1]
+            current_lower = lower_band.iloc[-1]
+            current_middle = sma.iloc[-1]
+            
+            if current_price >= current_upper:
+                return "UPPER"
+            elif current_price <= current_lower:
+                return "LOWER"
+            elif current_price > current_middle:
+                return "UPPER_MIDDLE"
+            else:
+                return "LOWER_MIDDLE"
+                
+        except Exception as e:
+            self.logger.error(f"Error calculating Bollinger Bands: {e}")
+            return "MIDDLE"
+    
+    def _analyze_volume_trend(self, rates: pd.DataFrame) -> str:
+        """Analyze volume trend"""
+        try:
+            if 'tick_volume' not in rates.columns:
+                return "NORMAL"
+            
+            volumes = rates['tick_volume']
+            avg_volume = volumes.rolling(window=20).mean()
+            
+            recent_volume = volumes.tail(5).mean()
+            baseline_volume = avg_volume.iloc[-1]
+            
+            if recent_volume > baseline_volume * 1.5:
+                return "HIGH"
+            elif recent_volume < baseline_volume * 0.7:
+                return "LOW"
+            else:
+                return "NORMAL"
+                
+        except Exception as e:
+            self.logger.error(f"Error analyzing volume: {e}")
+            return "NORMAL"
+    
+    def _calculate_moving_averages(self, rates: pd.DataFrame) -> Dict[str, float]:
+        """Calculate various moving averages"""
+        try:
+            closes = rates['close']
             
             return {
-                'k': k_percent.iloc[-1],
-                'd': d_percent.iloc[-1]
+                'sma10': float(closes.rolling(window=10).mean().iloc[-1]),
+                'sma20': float(closes.rolling(window=20).mean().iloc[-1]),
+                'sma50': float(closes.rolling(window=50).mean().iloc[-1]),
+                'ema10': float(closes.ewm(span=10).mean().iloc[-1]),
+                'ema20': float(closes.ewm(span=20).mean().iloc[-1]),
+                'ema50': float(closes.ewm(span=50).mean().iloc[-1])
             }
-        except:
-            return {'k': 50, 'd': 50}
+            
+        except Exception as e:
+            self.logger.error(f"Error calculating moving averages: {e}")
+            return {}
     
-    def _calculate_atr(self, df: pd.DataFrame, period: int = 14) -> float:
-        """Average True Range"""
+    def _calculate_support_resistance(self, rates: pd.DataFrame) -> Dict[str, float]:
+        """Calculate support and resistance levels"""
         try:
-            high_low = df['high'] - df['low']
-            high_close = np.abs(df['high'] - df['close'].shift())
-            low_close = np.abs(df['low'] - df['close'].shift())
+            highs = rates['high'].tail(50)
+            lows = rates['low'].tail(50)
             
-            ranges = pd.concat([high_low, high_close, low_close], axis=1)
-            true_range = np.max(ranges, axis=1)
+            # Find local maxima and minima
+            resistance_levels = []
+            support_levels = []
             
-            return true_range.rolling(window=period).mean().iloc[-1]
-        except:
+            for i in range(2, len(highs) - 2):
+                if (highs.iloc[i] > highs.iloc[i-1] and highs.iloc[i] > highs.iloc[i-2] and
+                    highs.iloc[i] > highs.iloc[i+1] and highs.iloc[i] > highs.iloc[i+2]):
+                    resistance_levels.append(highs.iloc[i])
+                
+                if (lows.iloc[i] < lows.iloc[i-1] and lows.iloc[i] < lows.iloc[i-2] and
+                    lows.iloc[i] < lows.iloc[i+1] and lows.iloc[i] < lows.iloc[i+2]):
+                    support_levels.append(lows.iloc[i])
+            
+            return {
+                'resistance': float(np.mean(resistance_levels)) if resistance_levels else float(highs.max()),
+                'support': float(np.mean(support_levels)) if support_levels else float(lows.min())
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Error calculating support/resistance: {e}")
+            return {'resistance': 0.0, 'support': 0.0}
+    
+    def _calculate_momentum(self, rates: pd.DataFrame, period: int = 14) -> float:
+        """Calculate price momentum"""
+        try:
+            closes = rates['close']
+            momentum = (closes.iloc[-1] - closes.iloc[-period]) / closes.iloc[-period] * 100
+            return float(momentum)
+            
+        except Exception as e:
+            self.logger.error(f"Error calculating momentum: {e}")
             return 0.0
     
-    def _calculate_fibonacci_levels(self, df: pd.DataFrame, period: int = 50) -> Dict[str, float]:
-        """Fibonacci Retracement Levels"""
+    def _calculate_volatility(self, rates: pd.DataFrame, period: int = 20) -> float:
+        """Calculate price volatility"""
         try:
-            recent_data = df.tail(period)
-            high_price = recent_data['high'].max()
-            low_price = recent_data['low'].min()
+            returns = rates['close'].pct_change()
+            volatility = returns.rolling(window=period).std() * np.sqrt(period) * 100
+            return float(volatility.iloc[-1])
             
+        except Exception as e:
+            self.logger.error(f"Error calculating volatility: {e}")
+            return 0.0
+    
+    def _calculate_fibonacci_levels(self, rates: pd.DataFrame) -> Dict[str, float]:
+        """Calculate Fibonacci retracement levels"""
+        try:
+            highs = rates['high'].tail(50)
+            lows = rates['low'].tail(50)
+            
+            high_price = highs.max()
+            low_price = lows.min()
             diff = high_price - low_price
             
             return {
-                'level_0': high_price,
-                'level_236': high_price - 0.236 * diff,
-                'level_382': high_price - 0.382 * diff,
-                'level_50': high_price - 0.5 * diff,
-                'level_618': high_price - 0.618 * diff,
-                'level_786': high_price - 0.786 * diff,
-                'level_100': low_price
+                'level_0': float(high_price),
+                'level_236': float(high_price - 0.236 * diff),
+                'level_382': float(high_price - 0.382 * diff),
+                'level_500': float(high_price - 0.500 * diff),
+                'level_618': float(high_price - 0.618 * diff),
+                'level_100': float(low_price)
             }
-        except:
-            return {f'level_{i}': 0 for i in ['0', '236', '382', '50', '618', '786', '100']}
+            
+        except Exception as e:
+            self.logger.error(f"Error calculating Fibonacci levels: {e}")
+            return {}
     
-    def _calculate_pivot_points(self, df: pd.DataFrame) -> Dict[str, float]:
-        """Daily Pivot Points"""
+    def _calculate_pivot_points(self, rates: pd.DataFrame) -> Dict[str, float]:
+        """Calculate pivot points for daily/weekly levels"""
         try:
-            yesterday = df.tail(1)
-            high = yesterday['high'].iloc[0]
-            low = yesterday['low'].iloc[0]
-            close = yesterday['close'].iloc[0]
+            # Use last complete day's data
+            yesterday = rates.tail(24) if len(rates) >= 24 else rates
+            
+            high = yesterday['high'].max()
+            low = yesterday['low'].min()
+            close = yesterday['close'].iloc[-1]
             
             pivot = (high + low + close) / 3
             
             return {
-                'pivot': pivot,
-                'r1': 2 * pivot - low,
-                'r2': pivot + (high - low),
-                'r3': high + 2 * (pivot - low),
-                's1': 2 * pivot - high,
-                's2': pivot - (high - low),
-                's3': low - 2 * (high - pivot)
+                'pivot': float(pivot),
+                'resistance1': float(2 * pivot - low),
+                'resistance2': float(pivot + (high - low)),
+                'support1': float(2 * pivot - high),
+                'support2': float(pivot - (high - low))
             }
-        except:
-            return {f'{level}': 0 for level in ['pivot', 'r1', 'r2', 'r3', 's1', 's2', 's3']}
+            
+        except Exception as e:
+            self.logger.error(f"Error calculating pivot points: {e}")
+            return {}
     
-    def _calculate_support_resistance(self, df: pd.DataFrame, period: int = 20) -> Dict[str, List[float]]:
-        """Dynamic Support and Resistance Levels"""
+    def _calculate_stochastic(self, rates: pd.DataFrame, k_period: int = 14, d_period: int = 3) -> Dict[str, float]:
+        """Calculate Stochastic Oscillator"""
         try:
-            recent_data = df.tail(period * 2)
+            highs = rates['high'].rolling(window=k_period).max()
+            lows = rates['low'].rolling(window=k_period).min()
+            closes = rates['close']
             
-            # Find local highs and lows
-            highs = recent_data[recent_data['high'] == recent_data['high'].rolling(window=5, center=True).max()]['high'].tolist()
-            lows = recent_data[recent_data['low'] == recent_data['low'].rolling(window=5, center=True).min()]['low'].tolist()
-            
-            # Remove duplicates and sort
-            resistance_levels = sorted(list(set(highs)), reverse=True)[:3]
-            support_levels = sorted(list(set(lows)))[:3]
+            k_percent = 100 * ((closes - lows) / (highs - lows))
+            d_percent = k_percent.rolling(window=d_period).mean()
             
             return {
-                'resistance': resistance_levels,
-                'support': support_levels
+                'k_percent': float(k_percent.iloc[-1]),
+                'd_percent': float(d_percent.iloc[-1])
             }
-        except:
-            return {'resistance': [], 'support': []}
+            
+        except Exception as e:
+            self.logger.error(f"Error calculating Stochastic: {e}")
+            return {'k_percent': 50.0, 'd_percent': 50.0}
     
-    def _determine_trend(self, df: pd.DataFrame, analysis: Dict) -> str:
-        """Determine overall trend direction"""
+    def _calculate_atr(self, rates: pd.DataFrame, period: int = 14) -> float:
+        """Calculate Average True Range"""
         try:
-            current_price = df['close'].iloc[-1]
-            ma10 = analysis['ma10']
-            ema50 = analysis['ema50']
+            highs = rates['high']
+            lows = rates['low']
+            closes = rates['close']
             
-            bullish_signals = 0
-            bearish_signals = 0
+            tr1 = highs - lows
+            tr2 = np.abs(highs - closes.shift())
+            tr3 = np.abs(lows - closes.shift())
             
-            # Price vs Moving Averages
-            if current_price > ma10:
-                bullish_signals += 1
-            else:
-                bearish_signals += 1
-                
-            if current_price > ema50:
-                bullish_signals += 1
-            else:
-                bearish_signals += 1
+            true_range = np.maximum(tr1, np.maximum(tr2, tr3))
+            atr = true_range.rolling(window=period).mean()
             
-            # MACD
-            if analysis['macd']['macd'] > analysis['macd']['signal']:
-                bullish_signals += 1
-            else:
-                bearish_signals += 1
+            return float(atr.iloc[-1])
             
-            # RSI
-            rsi = analysis['rsi']
-            if 40 < rsi < 60:
-                pass  # Neutral
-            elif rsi > 60:
-                bullish_signals += 1
-            elif rsi < 40:
-                bearish_signals += 1
-            
-            if bullish_signals > bearish_signals:
-                return "BULLISH"
-            elif bearish_signals > bullish_signals:
-                return "BEARISH"
-            else:
-                return "NEUTRAL"
-                
-        except:
-            return "NEUTRAL"
+        except Exception as e:
+            self.logger.error(f"Error calculating ATR: {e}")
+            return 0.0
     
-    def _calculate_momentum(self, df: pd.DataFrame, analysis: Dict) -> str:
-        """Calculate price momentum"""
+    def _calculate_wma(self, rates: pd.DataFrame, period: int = 20) -> float:
+        """Calculate Weighted Moving Average"""
         try:
-            macd_histogram = analysis['macd']['histogram']
-            rsi = analysis['rsi']
-            stoch_k = analysis['stochastic']['k']
+            closes = rates['close'].tail(period)
+            weights = np.arange(1, period + 1)
+            wma = np.average(closes, weights=weights)
+            return float(wma)
             
-            if macd_histogram > 0 and rsi > 55 and stoch_k > 50:
-                return "STRONG_BULLISH"
-            elif macd_histogram < 0 and rsi < 45 and stoch_k < 50:
-                return "STRONG_BEARISH"
-            elif macd_histogram > 0 or rsi > 50:
-                return "WEAK_BULLISH"
-            elif macd_histogram < 0 or rsi < 50:
-                return "WEAK_BEARISH"
-            else:
-                return "NEUTRAL"
-        except:
-            return "NEUTRAL"
+        except Exception as e:
+            self.logger.error(f"Error calculating WMA: {e}")
+            return 0.0
     
     def _calculate_signal_strength(self, analysis: Dict) -> float:
-        """Calculate signal strength (0-100)"""
+        """Calculate overall signal strength from all indicators"""
         try:
-            strength = 50  # Base strength
+            strength = 0.0
             
             # RSI contribution
-            rsi = analysis['rsi']
+            rsi = analysis.get('rsi', 50)
             if rsi > 70:
                 strength += 15  # Overbought
             elif rsi < 30:
                 strength += 15  # Oversold
-            elif 45 < rsi < 55:
-                strength -= 10  # Neutral zone
+            elif 40 < rsi < 60:
+                strength += 5   # Neutral zone
             
             # MACD contribution
-            macd = analysis['macd']
-            if abs(macd['histogram']) > abs(macd['macd']) * 0.1:
+            macd_data = analysis.get('macd', {})
+            if isinstance(macd_data, dict):
+                macd = macd_data.get('macd', 0)
+                signal = macd_data.get('signal', 0)
+                if macd > signal:
+                    strength += 10  # Bullish crossover
+                elif macd < signal:
+                    strength += 10  # Bearish crossover
+            
+            # Trend contribution
+            trend = analysis.get('trend', 'NEUTRAL')
+            if trend in ['BULLISH', 'BEARISH']:
+                strength += 20
+            elif trend in ['WEAK_BULLISH', 'WEAK_BEARISH']:
                 strength += 10
             
-            # Stochastic contribution
-            stoch = analysis['stochastic']
-            if stoch['k'] > 80 or stoch['k'] < 20:
+            # Bollinger Bands contribution
+            bb_position = analysis.get('bollinger_position', 'MIDDLE')
+            if bb_position in ['UPPER', 'LOWER']:
+                strength += 15
+            
+            # Volume contribution
+            volume_trend = analysis.get('volume_trend', 'NORMAL')
+            if volume_trend == 'HIGH':
                 strength += 10
             
-            return min(max(strength, 0), 100)
-        except:
-            return 50
-    
-    def _get_bollinger_position(self, df: pd.DataFrame, bollinger: Dict) -> str:
-        """Determine position relative to Bollinger Bands"""
-        try:
-            current_price = df['close'].iloc[-1]
-            upper = bollinger['upper']
-            lower = bollinger['lower']
-            middle = bollinger['middle']
+            return min(strength, 100.0)  # Cap at 100%
             
-            if current_price > upper:
-                return "ABOVE_UPPER"
-            elif current_price < lower:
-                return "BELOW_LOWER"
-            elif current_price > middle:
-                return "UPPER_HALF"
+        except Exception as e:
+            self.logger.error(f"Error calculating signal strength: {e}")
+            return 0.0
+    
+    def _determine_market_condition(self, analysis: Dict) -> str:
+        """Determine current market condition"""
+        try:
+            trend = analysis.get('trend', 'NEUTRAL')
+            volatility = analysis.get('volatility', 0)
+            signal_strength = analysis.get('signal_strength', 0)
+            
+            if signal_strength > 70:
+                if 'BULLISH' in trend:
+                    return 'STRONG_UPTREND'
+                elif 'BEARISH' in trend:
+                    return 'STRONG_DOWNTREND'
+                else:
+                    return 'VOLATILE'
+            elif signal_strength > 40:
+                if 'BULLISH' in trend:
+                    return 'UPTREND'
+                elif 'BEARISH' in trend:
+                    return 'DOWNTREND'
+                else:
+                    return 'SIDEWAYS'
             else:
-                return "LOWER_HALF"
-        except:
-            return "MIDDLE"
+                return 'CONSOLIDATION'
+                
+        except Exception as e:
+            self.logger.error(f"Error determining market condition: {e}")
+            return 'UNKNOWN'
     
-    def _analyze_volume_trend(self, df: pd.DataFrame) -> str:
-        """Analyze volume trend"""
+    def get_trading_signals(self, rates: pd.DataFrame) -> Dict[str, Any]:
+        """Get specific trading signals based on technical analysis"""
         try:
-            if 'tick_volume' not in df.columns:
-                return "NORMAL"
-            
-            recent_volume = df['tick_volume'].tail(5).mean()
-            previous_volume = df['tick_volume'].tail(20).head(15).mean()
-            
-            if recent_volume > previous_volume * 1.5:
-                return "HIGH"
-            elif recent_volume < previous_volume * 0.7:
-                return "LOW"
-            else:
-                return "NORMAL"
-        except:
-            return "NORMAL"
-    
-    def _get_default_analysis(self) -> Dict[str, Any]:
-        """Return default analysis when calculation fails"""
-        return {
-            'trend': 'NEUTRAL',
-            'momentum': 'NEUTRAL',
-            'signal_strength': 50,
-            'rsi': 50,
-            'macd': {'macd': 0, 'signal': 0, 'histogram': 0},
-            'bollinger_position': 'MIDDLE',
-            'volume_trend': 'NORMAL',
-            'ma10': 0,
-            'ema50': 0,
-            'bollinger': {'upper': 0, 'middle': 0, 'lower': 0},
-            'stochastic': {'k': 50, 'd': 50},
-            'atr': 0,
-            'fibonacci': {},
-            'pivot_points': {},
-            'support_resistance': {'resistance': [], 'support': []}
-        }
-    
-    def get_trading_signals(self, df: pd.DataFrame) -> Dict[str, Any]:
-        """Generate trading signals based on technical analysis"""
-        try:
-            analysis = self.analyze_trends(df)
+            analysis = self.analyze_trends(rates)
             
             signals = {
-                'action': 'HOLD',
-                'confidence': 0.0,
-                'stop_loss_pips': 20,
-                'take_profit_pips': 40,
-                'reasoning': []
+                'buy_signals': [],
+                'sell_signals': [],
+                'neutral_signals': [],
+                'overall_signal': 'NEUTRAL',
+                'confidence': 0.0
             }
             
-            confidence = 0
-            reasoning = []
+            # RSI signals
+            rsi = analysis.get('rsi', 50)
+            if rsi < 30:
+                signals['buy_signals'].append('RSI_Oversold')
+            elif rsi > 70:
+                signals['sell_signals'].append('RSI_Overbought')
             
-            # Fast signals (Price Action, MA10)
-            current_price = df['close'].iloc[-1]
-            ma10 = analysis['ma10']
+            # MACD signals
+            macd_data = analysis.get('macd', {})
+            if isinstance(macd_data, dict):
+                macd = macd_data.get('macd', 0)
+                signal_line = macd_data.get('signal', 0)
+                if macd > signal_line and macd > 0:
+                    signals['buy_signals'].append('MACD_Bullish')
+                elif macd < signal_line and macd < 0:
+                    signals['sell_signals'].append('MACD_Bearish')
             
-            if current_price > ma10:
-                confidence += 20
-                reasoning.append("Price above MA10")
-            elif current_price < ma10:
-                confidence += 20
-                reasoning.append("Price below MA10")
+            # Trend signals
+            trend = analysis.get('trend', 'NEUTRAL')
+            if 'BULLISH' in trend:
+                signals['buy_signals'].append('Trend_Bullish')
+            elif 'BEARISH' in trend:
+                signals['sell_signals'].append('Trend_Bearish')
             
-            # Slow signals (EMA50, RSI)
-            ema50 = analysis['ema50']
-            rsi = analysis['rsi']
+            # Determine overall signal
+            buy_count = len(signals['buy_signals'])
+            sell_count = len(signals['sell_signals'])
             
-            if current_price > ema50 and rsi < 70:
-                confidence += 15
-                reasoning.append("Bullish trend confirmed")
-                signals['action'] = 'BUY'
-            elif current_price < ema50 and rsi > 30:
-                confidence += 15
-                reasoning.append("Bearish trend confirmed")
-                signals['action'] = 'SELL'
-            
-            # MACD confirmation
-            if analysis['macd']['histogram'] > 0:
-                confidence += 10
-                reasoning.append("MACD bullish")
-            elif analysis['macd']['histogram'] < 0:
-                confidence += 10
-                reasoning.append("MACD bearish")
-            
-            # Bollinger Bands
-            bb_pos = analysis['bollinger_position']
-            if bb_pos == 'BELOW_LOWER':
-                confidence += 15
-                reasoning.append("Oversold on Bollinger")
-                if signals['action'] == 'HOLD':
-                    signals['action'] = 'BUY'
-            elif bb_pos == 'ABOVE_UPPER':
-                confidence += 15
-                reasoning.append("Overbought on Bollinger")
-                if signals['action'] == 'HOLD':
-                    signals['action'] = 'SELL'
-            
-            signals['confidence'] = min(confidence / 100.0, 1.0)
-            signals['reasoning'] = reasoning
-            
-            # Dynamic SL/TP based on ATR
-            atr = analysis['atr']
-            if atr > 0:
-                signals['stop_loss_pips'] = max(15, int(atr * 1.5))
-                signals['take_profit_pips'] = max(30, int(atr * 3))
+            if buy_count > sell_count and buy_count >= 2:
+                signals['overall_signal'] = 'BUY'
+                signals['confidence'] = min((buy_count / 5.0) * 100, 95)
+            elif sell_count > buy_count and sell_count >= 2:
+                signals['overall_signal'] = 'SELL'
+                signals['confidence'] = min((sell_count / 5.0) * 100, 95)
+            else:
+                signals['overall_signal'] = 'NEUTRAL'
+                signals['confidence'] = analysis.get('signal_strength', 0) / 2
             
             return signals
             
         except Exception as e:
-            self.logger.error(f"Error generating trading signals: {e}")
+            self.logger.error(f"Error getting trading signals: {e}")
             return {
-                'action': 'HOLD',
-                'confidence': 0.0,
-                'stop_loss_pips': 20,
-                'take_profit_pips': 40,
-                'reasoning': ['Analysis error']
+                'buy_signals': [],
+                'sell_signals': [],
+                'neutral_signals': [],
+                'overall_signal': 'NEUTRAL',
+                'confidence': 0.0
             }
