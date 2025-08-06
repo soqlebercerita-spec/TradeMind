@@ -1,0 +1,35 @@
+Saya ingin kamu bertindak sebagai seorang **Senior Python Developer** sekaligus **Expert di bidang Automated Trading System menggunakan MetaTrader 5 (MT5)**.
+
+Saya telah memiliki project bot trading berbasis Python + MT5 dengan GUI Tkinter dan berbagai strategi. Namun saat ini, terdapat banyak **file yang tidak lengkap, tidak terdefinisi, tidak terkoneksi antar modul, dan menyebabkan bot tidak berjalan sempurna**.
+
+Tugas kamu adalah:
+1. **Lakukan analisis mendalam terhadap seluruh struktur file, baris kode, dan dependensi.**
+2. Deteksi dan laporkan semua:
+   - File kosong
+   - Fungsi yang tidak digunakan / tidak dipanggil
+   - Modul yang di-import tapi tidak digunakan
+   - Variabel tidak didefinisikan atau salah referensi
+   - Struktur logika yang tumpang tindih
+   - Potensi deadlock atau thread conflict
+   - Error tersembunyi yang membuat sistem crash atau tidak stabil
+   - Inisialisasi koneksi MT5 yang gagal, tidak sinkron, atau tidak konsisten
+   - GUI yang tidak sinkron dengan sistem backend
+   - Fungsi GUI yang tidak terhubung ke MT5 atau strategi
+   - Semua bagian GUI yang tidak aktif, tidak bekerja, atau hanya hiasan
+
+3. Buatkan saya:
+   - Daftar **semua file atau fungsi yang bermasalah**
+   - Daftar **modul yang missing atau tidak diperlukan**
+   - Rekomendasi **struktur dan perbaikan kode**
+   - **Fix codingan** langsung jika memungkinkan
+   - **Optimasi GUI** agar tampil rapi, modern, responsif, dan semua elemen bisa digunakan
+   - Pastikan GUI benar-benar **terkoneksi dan sinkron** dengan seluruh fungsi sistem
+
+⚠️ Penting:
+- **Jangan buat ulang dari nol**, hanya fokus **memperbaiki yang sudah ada**
+- Perbaiki agar **bot bisa jalan sempurna tanpa error**
+- **Gunakan analisa mendalam dan crosscheck antar file**
+- Pastikan bot bisa **terhubung ke MT5 secara otomatis**, membaca simbol, dan menjalankan strategi tanpa hambatan
+
+Setelah itu, beri saya ringkasan **semua perbaikan yang kamu lakukan**. 
+Saya ingin hasil kerja akhir berupa **bot yang stabil, bersih, efisien, dan profesional** secara struktur dan fungsi.
