@@ -1,5 +1,11 @@
 
 """
 Trading strategies for AuraTrade Bot
-HFT, Scalping, and Pattern-based strategies
+Multiple strategy implementations for different market conditions
 """
+
+from .scalping_strategy import ScalpingStrategy
+from .hft_strategy import HFTStrategy
+from .pattern_strategy import PatternStrategy
+
+__all__ = ['ScalpingStrategy', 'HFTStrategy', 'PatternStrategy']

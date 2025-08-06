@@ -8,7 +8,7 @@ packages = ["glibcLocales"]
 run = ["sh", "-c", "cd AuraTrade && python bot.py"]
 
 [workflows]
-runButton = "Install and Run AuraTrade"
+runButton = "Install and Run AuraTrade Fixed"
 
 [[workflows.workflow]]
 name = "Run TradeMind Bot"
@@ -49,6 +49,55 @@ args = "pip install --upgrade pip"
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "pip install -r requirements.txt"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "cd AuraTrade && python bot.py"
+
+[[workflows.workflow]]
+name = "Install and Run AuraTrade Fixed"
+author = 46036441
+mode = "sequential"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "echo \"Installing AuraTrade Bot dependencies...\""
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "python -m pip install --upgrade pip setuptools wheel"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "python -m pip install -r requirements.txt --no-cache-dir"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "echo \"Creating necessary directories...\""
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "mkdir -p AuraTrade/logs"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "mkdir -p AuraTrade/data/cache"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "mkdir -p AuraTrade/reports"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "echo \"Setting up environment...\""
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "if [ ! -f .env ]; then cp .env.example .env; fi"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "echo \"Starting AuraTrade Bot...\""
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"

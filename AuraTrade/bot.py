@@ -1,4 +1,3 @@
-
 #!/usr/bin/env python3
 """
 AuraTrade - High-Performance Trading Bot
@@ -124,8 +123,9 @@ class AuraTradeBot:
             # Initialize order manager
             self.order_manager = OrderManager(self.mt5_connector, self.risk_manager, self.notifier)
 
-            # Initialize ML engine (placeholder)
+            # Initialize ML engine
             self.ml_engine = MLEngine()
+            self.logger.info("ML Engine initialized")
 
             # Initialize strategies
             strategies = {
@@ -151,7 +151,7 @@ class AuraTradeBot:
             )
 
             self.logger.info("All components initialized successfully")
-            
+
             # Send startup notification
             if self.notifier and self.notifier.enabled:
                 try:
@@ -162,7 +162,7 @@ class AuraTradeBot:
                     )
                 except Exception as e:
                     self.logger.warning(f"Could not send startup notification: {e}")
-            
+
             return True
 
         except Exception as e:
@@ -174,7 +174,7 @@ class AuraTradeBot:
         if not GUI_AVAILABLE:
             self.logger.info("GUI not available - running in console mode")
             return True
-            
+
         try:
             self.logger.info("Initializing GUI...")
 

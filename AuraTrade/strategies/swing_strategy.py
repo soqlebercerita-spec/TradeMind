@@ -1,357 +1,471 @@
 
 """
 Swing Trading Strategy for AuraTrade Bot
-Medium-term trend following with higher timeframes
+Medium-term trend following strategy
 """
 
-import numpy as np
 import pandas as pd
+import numpy as np
+from typing import Dict, List, Optional
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Any
-from utils.logger import Logger, log_info, log_error
+from utils.logger import Logger
 
 class SwingStrategy:
     """Swing trading strategy for medium-term trends"""
     
-    def __init__(self):
+    def __init__(self, params: Dict = None):
+        self.name = "Swing"
         self.logger = Logger().get_logger()
-        self.name = "Swing Strategy"
         
-        # Strategy parameters
+        # Default parameters
         self.params = {
-            'timeframe': 'H1',           # 1-hour charts
-            'target_pips': 50,           # 50 pip target
-            'stop_loss_pips': 30,        # 30 pip stop loss
-            'min_confidence': 0.65,      # Minimum signal confidence
-            'trend_period': 50,          # Trend detection period
+            'timeframe': 'H4',
+            'ma_fast': 20,
+            'ma_slow': 50,
             'rsi_period': 14,
-            'macd_fast': 12,
-            'macd_slow': 26,
-            'macd_signal': 9,
-            'bb_period': 20,
-            'adx_period': 14,
-            'min_trend_strength': 25     # Minimum ADX for trend trades
+            'rsi_oversold': 30,
+            'rsi_overbought': 70,
+            'atr_period': 14,
+            'atr_multiplier': 2.0,
+            'volume': 0.1,
+            'stop_loss_atr': 2.0,
+            'take_profit_ratio': 2.0,  # Risk:Reward 1:2
+            'min_trend_strength': 0.6,
+            'max_positions': 3
         }
         
-        # Performance tracking
-        self.active_positions = {}
-        self.trades_this_week = 0
-        self.wins_this_week = 0
+        if params:
+            self.params.update(params)
+            
+        self.trend_direction = 'NEUTRAL'
+        self.last_signals = []
         
-        log_info("SwingStrategy", "Swing strategy initialized")
+        self.logger.info(f"Swing strategy initialized with params: {self.params}")
     
-    def analyze(self, symbol: str, data: pd.DataFrame, current_spread: float) -> Optional[Dict[str, Any]]:
+    def analyze_market(self, rates: pd.DataFrame, tick: Dict = None) -> Dict[str, any]:
         """Analyze market for swing trading opportunities"""
         try:
-            if data.empty or len(data) < 100:
-                return None
-            
-            # Don't open new positions if we already have one for this symbol
-            if symbol in self.active_positions:
-                return None
+            if len(rates) < max(self.params['ma_slow'], self.params['rsi_period'], self.params['atr_period']) + 10:
+                return {'signals': [], 'analysis': {}}
             
             # Calculate indicators
-            indicators = self._calculate_indicators(data)
-            if not indicators:
-                return None
+            analysis = self._calculate_indicators(rates)
+            
+            # Determine trend
+            trend = self._identify_trend(analysis, rates)
             
             # Generate signals
-            signals = self._generate_signals(indicators, symbol)
+            signals = self._generate_signals(analysis, trend, rates)
+            
+            # Risk assessment
+            risk_assessment = self._assess_risk(analysis, rates)
+            
+            return {
+                'signals': signals,
+                'analysis': analysis,
+                'trend': trend,
+                'risk_assessment': risk_assessment,
+                'strategy': self.name,
+                'timestamp': datetime.now()
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Error in swing market analysis: {e}")
+            return {'signals': [], 'analysis': {}}
+    
+    def _calculate_indicators(self, rates: pd.DataFrame) -> Dict[str, any]:
+        """Calculate technical indicators for swing trading"""
+        try:
+            analysis = {}
+            
+            # Moving Averages
+            analysis['ma_fast'] = rates['close'].rolling(window=self.params['ma_fast']).mean()
+            analysis['ma_slow'] = rates['close'].rolling(window=self.params['ma_slow']).mean()
+            
+            # RSI
+            analysis['rsi'] = self._calculate_rsi(rates, self.params['rsi_period'])
+            
+            # ATR for volatility
+            analysis['atr'] = self._calculate_atr(rates, self.params['atr_period'])
+            
+            # MACD
+            macd_data = self._calculate_macd(rates)
+            analysis.update(macd_data)
+            
+            # Bollinger Bands
+            bb_data = self._calculate_bollinger_bands(rates)
+            analysis.update(bb_data)
+            
+            # Support and Resistance
+            sr_data = self._calculate_support_resistance(rates)
+            analysis.update(sr_data)
+            
+            # Trend strength
+            analysis['trend_strength'] = self._calculate_trend_strength(rates)
+            
+            return analysis
+            
+        except Exception as e:
+            self.logger.error(f"Error calculating indicators: {e}")
+            return {}
+    
+    def _calculate_rsi(self, rates: pd.DataFrame, period: int = 14) -> pd.Series:
+        """Calculate RSI"""
+        try:
+            delta = rates['close'].diff()
+            gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
+            loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
+            
+            rs = gain / loss
+            rsi = 100 - (100 / (1 + rs))
+            return rsi
+            
+        except Exception as e:
+            self.logger.error(f"Error calculating RSI: {e}")
+            return pd.Series([50] * len(rates), index=rates.index)
+    
+    def _calculate_atr(self, rates: pd.DataFrame, period: int = 14) -> pd.Series:
+        """Calculate Average True Range"""
+        try:
+            high_low = rates['high'] - rates['low']
+            high_close = np.abs(rates['high'] - rates['close'].shift())
+            low_close = np.abs(rates['low'] - rates['close'].shift())
+            
+            tr = np.maximum(high_low, np.maximum(high_close, low_close))
+            atr = tr.rolling(window=period).mean()
+            return atr
+            
+        except Exception as e:
+            self.logger.error(f"Error calculating ATR: {e}")
+            return pd.Series([0.001] * len(rates), index=rates.index)
+    
+    def _calculate_macd(self, rates: pd.DataFrame, fast: int = 12, slow: int = 26, signal: int = 9) -> Dict:
+        """Calculate MACD"""
+        try:
+            exp1 = rates['close'].ewm(span=fast).mean()
+            exp2 = rates['close'].ewm(span=slow).mean()
+            
+            macd_line = exp1 - exp2
+            signal_line = macd_line.ewm(span=signal).mean()
+            histogram = macd_line - signal_line
+            
+            return {
+                'macd_line': macd_line,
+                'macd_signal': signal_line,
+                'macd_histogram': histogram
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Error calculating MACD: {e}")
+            return {'macd_line': pd.Series([0] * len(rates)), 'macd_signal': pd.Series([0] * len(rates)), 'macd_histogram': pd.Series([0] * len(rates))}
+    
+    def _calculate_bollinger_bands(self, rates: pd.DataFrame, period: int = 20, std_dev: int = 2) -> Dict:
+        """Calculate Bollinger Bands"""
+        try:
+            sma = rates['close'].rolling(window=period).mean()
+            std = rates['close'].rolling(window=period).std()
+            
+            upper_band = sma + (std * std_dev)
+            lower_band = sma - (std * std_dev)
+            
+            return {
+                'bb_upper': upper_band,
+                'bb_middle': sma,
+                'bb_lower': lower_band,
+                'bb_width': (upper_band - lower_band) / sma
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Error calculating Bollinger Bands: {e}")
+            return {'bb_upper': pd.Series([0] * len(rates)), 'bb_middle': pd.Series([0] * len(rates)), 'bb_lower': pd.Series([0] * len(rates))}
+    
+    def _calculate_support_resistance(self, rates: pd.DataFrame, lookback: int = 50) -> Dict:
+        """Calculate support and resistance levels"""
+        try:
+            if len(rates) < lookback:
+                lookback = len(rates)
+            
+            recent_rates = rates.tail(lookback)
+            
+            # Find local highs and lows
+            highs = recent_rates['high'].values
+            lows = recent_rates['low'].values
+            
+            resistance_levels = []
+            support_levels = []
+            
+            # Simple peak detection
+            for i in range(2, len(highs) - 2):
+                if highs[i] > highs[i-1] and highs[i] > highs[i-2] and highs[i] > highs[i+1] and highs[i] > highs[i+2]:
+                    resistance_levels.append(highs[i])
+                
+                if lows[i] < lows[i-1] and lows[i] < lows[i-2] and lows[i] < lows[i+1] and lows[i] < lows[i+2]:
+                    support_levels.append(lows[i])
+            
+            # Get strongest levels
+            current_price = rates['close'].iloc[-1]
+            
+            resistance_above = [r for r in resistance_levels if r > current_price]
+            support_below = [s for s in support_levels if s < current_price]
+            
+            nearest_resistance = min(resistance_above) if resistance_above else None
+            nearest_support = max(support_below) if support_below else None
+            
+            return {
+                'nearest_resistance': nearest_resistance,
+                'nearest_support': nearest_support,
+                'all_resistance': sorted(resistance_levels),
+                'all_support': sorted(support_levels)
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Error calculating support/resistance: {e}")
+            return {'nearest_resistance': None, 'nearest_support': None}
+    
+    def _calculate_trend_strength(self, rates: pd.DataFrame, period: int = 20) -> float:
+        """Calculate trend strength"""
+        try:
+            if len(rates) < period:
+                return 0.5
+            
+            recent_rates = rates.tail(period)
+            
+            # Calculate price direction changes
+            price_changes = recent_rates['close'].diff()
+            positive_changes = (price_changes > 0).sum()
+            negative_changes = (price_changes < 0).sum()
+            
+            # Trend strength based on directional consistency
+            total_changes = positive_changes + negative_changes
+            if total_changes == 0:
+                return 0.5
+            
+            if positive_changes > negative_changes:
+                strength = positive_changes / total_changes
+            else:
+                strength = negative_changes / total_changes
+            
+            return strength
+            
+        except Exception as e:
+            self.logger.error(f"Error calculating trend strength: {e}")
+            return 0.5
+    
+    def _identify_trend(self, analysis: Dict, rates: pd.DataFrame) -> Dict[str, any]:
+        """Identify market trend"""
+        try:
+            if 'ma_fast' not in analysis or 'ma_slow' not in analysis:
+                return {'direction': 'NEUTRAL', 'strength': 0.5, 'confidence': 0.0}
+            
+            current_ma_fast = analysis['ma_fast'].iloc[-1]
+            current_ma_slow = analysis['ma_slow'].iloc[-1]
+            current_price = rates['close'].iloc[-1]
+            
+            # Trend direction
+            if current_ma_fast > current_ma_slow and current_price > current_ma_fast:
+                direction = 'BULLISH'
+            elif current_ma_fast < current_ma_slow and current_price < current_ma_fast:
+                direction = 'BEARISH'
+            else:
+                direction = 'NEUTRAL'
+            
+            # Trend strength
+            strength = analysis.get('trend_strength', 0.5)
+            
+            # Confidence based on multiple factors
+            confidence = 0.0
+            
+            # MA alignment
+            if direction != 'NEUTRAL':
+                confidence += 0.3
+            
+            # MACD confirmation
+            if 'macd_line' in analysis and 'macd_signal' in analysis:
+                macd_line = analysis['macd_line'].iloc[-1]
+                macd_signal = analysis['macd_signal'].iloc[-1]
+                
+                if direction == 'BULLISH' and macd_line > macd_signal:
+                    confidence += 0.3
+                elif direction == 'BEARISH' and macd_line < macd_signal:
+                    confidence += 0.3
+            
+            # RSI confirmation
+            if 'rsi' in analysis:
+                rsi = analysis['rsi'].iloc[-1]
+                if direction == 'BULLISH' and 30 < rsi < 70:
+                    confidence += 0.2
+                elif direction == 'BEARISH' and 30 < rsi < 70:
+                    confidence += 0.2
+            
+            # Trend strength confirmation
+            if strength > self.params['min_trend_strength']:
+                confidence += 0.2
+            
+            self.trend_direction = direction
+            
+            return {
+                'direction': direction,
+                'strength': strength,
+                'confidence': min(1.0, confidence),
+                'ma_fast': current_ma_fast,
+                'ma_slow': current_ma_slow,
+                'current_price': current_price
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Error identifying trend: {e}")
+            return {'direction': 'NEUTRAL', 'strength': 0.5, 'confidence': 0.0}
+    
+    def _generate_signals(self, analysis: Dict, trend: Dict, rates: pd.DataFrame) -> List[Dict]:
+        """Generate swing trading signals"""
+        try:
+            signals = []
+            
+            if trend['confidence'] < 0.6:
+                return signals
+            
+            current_price = rates['close'].iloc[-1]
+            atr = analysis.get('atr', pd.Series([0.001] * len(rates))).iloc[-1]
+            
+            # Entry conditions
+            entry_signal = None
+            
+            # Bullish setup
+            if (trend['direction'] == 'BULLISH' and 
+                analysis.get('rsi', pd.Series([50] * len(rates))).iloc[-1] < 70):
+                
+                # Check for pullback to MA
+                ma_fast = analysis['ma_fast'].iloc[-1]
+                if abs(current_price - ma_fast) / ma_fast < 0.005:  # Within 0.5% of MA
+                    entry_signal = {
+                        'action': 'buy',
+                        'reason': 'Bullish trend pullback to MA',
+                        'confidence': trend['confidence']
+                    }
+            
+            # Bearish setup
+            elif (trend['direction'] == 'BEARISH' and 
+                  analysis.get('rsi', pd.Series([50] * len(rates))).iloc[-1] > 30):
+                
+                # Check for pullback to MA
+                ma_fast = analysis['ma_fast'].iloc[-1]
+                if abs(current_price - ma_fast) / ma_fast < 0.005:  # Within 0.5% of MA
+                    entry_signal = {
+                        'action': 'sell',
+                        'reason': 'Bearish trend pullback to MA',
+                        'confidence': trend['confidence']
+                    }
+            
+            # Create complete signal
+            if entry_signal:
+                stop_loss_distance = atr * self.params['stop_loss_atr']
+                
+                if entry_signal['action'] == 'buy':
+                    stop_loss = current_price - stop_loss_distance
+                    take_profit = current_price + (stop_loss_distance * self.params['take_profit_ratio'])
+                else:
+                    stop_loss = current_price + stop_loss_distance
+                    take_profit = current_price - (stop_loss_distance * self.params['take_profit_ratio'])
+                
+                signal = {
+                    'action': entry_signal['action'],
+                    'confidence': entry_signal['confidence'],
+                    'reason': entry_signal['reason'],
+                    'entry_price': current_price,
+                    'stop_loss': stop_loss,
+                    'take_profit': take_profit,
+                    'volume': self.params['volume'],
+                    'timeframe': self.params['timeframe'],
+                    'expected_duration': '4-24 hours',
+                    'risk_reward': f"1:{self.params['take_profit_ratio']}"
+                }
+                
+                signals.append(signal)
             
             return signals
             
         except Exception as e:
-            log_error("SwingStrategy", f"Error analyzing {symbol}", e)
-            return None
-    
-    def _calculate_indicators(self, data: pd.DataFrame) -> Optional[Dict[str, Any]]:
-        """Calculate technical indicators for swing trading"""
-        try:
-            close = data['close'].values
-            high = data['high'].values
-            low = data['low'].values
-            
-            # Trend indicators
-            sma_20 = pd.Series(close).rolling(window=20).mean().values
-            sma_50 = pd.Series(close).rolling(window=50).mean().values
-            ema_20 = pd.Series(close).ewm(span=20).mean().values
-            
-            # MACD
-            ema_12 = pd.Series(close).ewm(span=self.params['macd_fast']).mean()
-            ema_26 = pd.Series(close).ewm(span=self.params['macd_slow']).mean()
-            macd_line = (ema_12 - ema_26).values
-            macd_signal = pd.Series(macd_line).ewm(span=self.params['macd_signal']).mean().values
-            macd_histogram = macd_line - macd_signal
-            
-            # RSI
-            delta = pd.Series(close).diff()
-            gain = (delta.where(delta > 0, 0)).rolling(window=self.params['rsi_period']).mean()
-            loss = (-delta.where(delta < 0, 0)).rolling(window=self.params['rsi_period']).mean()
-            rs = gain / loss
-            rsi = (100 - (100 / (1 + rs))).values
-            
-            # ADX for trend strength
-            high_low = high - low
-            high_close = np.abs(high - np.roll(close, 1))
-            low_close = np.abs(low - np.roll(close, 1))
-            tr = np.maximum(high_low, np.maximum(high_close, low_close))
-            
-            # Simplified ADX calculation
-            plus_dm = np.where((high - np.roll(high, 1)) > (np.roll(low, 1) - low), 
-                              np.maximum(high - np.roll(high, 1), 0), 0)
-            minus_dm = np.where((np.roll(low, 1) - low) > (high - np.roll(high, 1)), 
-                               np.maximum(np.roll(low, 1) - low, 0), 0)
-            
-            tr_smooth = pd.Series(tr).rolling(window=14).mean().values
-            plus_di = 100 * (pd.Series(plus_dm).rolling(window=14).mean() / tr_smooth).values
-            minus_di = 100 * (pd.Series(minus_dm).rolling(window=14).mean() / tr_smooth).values
-            
-            dx = 100 * np.abs(plus_di - minus_di) / (plus_di + minus_di + 1e-10)
-            adx = pd.Series(dx).rolling(window=14).mean().values
-            
-            # Bollinger Bands
-            bb_middle = pd.Series(close).rolling(window=self.params['bb_period']).mean().values
-            bb_std = pd.Series(close).rolling(window=self.params['bb_period']).std().values
-            bb_upper = bb_middle + (bb_std * 2)
-            bb_lower = bb_middle - (bb_std * 2)
-            
-            # Support and Resistance levels
-            resistance = self._find_resistance_levels(high, close)
-            support = self._find_support_levels(low, close)
-            
-            return {
-                'close': close[-1],
-                'sma_20': sma_20[-1] if not np.isnan(sma_20[-1]) else close[-1],
-                'sma_50': sma_50[-1] if not np.isnan(sma_50[-1]) else close[-1],
-                'ema_20': ema_20[-1] if not np.isnan(ema_20[-1]) else close[-1],
-                'macd': macd_line[-1] if not np.isnan(macd_line[-1]) else 0,
-                'macd_signal': macd_signal[-1] if not np.isnan(macd_signal[-1]) else 0,
-                'macd_histogram': macd_histogram[-1] if not np.isnan(macd_histogram[-1]) else 0,
-                'rsi': rsi[-1] if not np.isnan(rsi[-1]) else 50,
-                'adx': adx[-1] if not np.isnan(adx[-1]) else 25,
-                'plus_di': plus_di[-1] if not np.isnan(plus_di[-1]) else 25,
-                'minus_di': minus_di[-1] if not np.isnan(minus_di[-1]) else 25,
-                'bb_upper': bb_upper[-1] if not np.isnan(bb_upper[-1]) else close[-1] * 1.02,
-                'bb_middle': bb_middle[-1] if not np.isnan(bb_middle[-1]) else close[-1],
-                'bb_lower': bb_lower[-1] if not np.isnan(bb_lower[-1]) else close[-1] * 0.98,
-                'resistance': resistance,
-                'support': support
-            }
-            
-        except Exception as e:
-            log_error("SwingStrategy", "Error calculating indicators", e)
-            return None
-    
-    def _find_resistance_levels(self, high: np.ndarray, close: np.ndarray) -> List[float]:
-        """Find resistance levels from recent highs"""
-        try:
-            current_price = close[-1]
-            recent_highs = []
-            
-            # Look for swing highs in the last 50 periods
-            for i in range(2, min(50, len(high) - 2)):
-                if (high[-i] > high[-i-1] and high[-i] > high[-i-2] and 
-                    high[-i] > high[-i+1] and high[-i] > high[-i+2]):
-                    if high[-i] > current_price:  # Only resistance above current price
-                        recent_highs.append(high[-i])
-            
-            # Return top 3 resistance levels
-            return sorted(set(recent_highs), reverse=True)[:3]
-            
-        except Exception:
+            self.logger.error(f"Error generating signals: {e}")
             return []
     
-    def _find_support_levels(self, low: np.ndarray, close: np.ndarray) -> List[float]:
-        """Find support levels from recent lows"""
+    def _assess_risk(self, analysis: Dict, rates: pd.DataFrame) -> Dict[str, any]:
+        """Assess risk for swing trading"""
         try:
-            current_price = close[-1]
-            recent_lows = []
+            risk_factors = []
+            risk_level = 'LOW'
             
-            # Look for swing lows in the last 50 periods
-            for i in range(2, min(50, len(low) - 2)):
-                if (low[-i] < low[-i-1] and low[-i] < low[-i-2] and 
-                    low[-i] < low[-i+1] and low[-i] < low[-i+2]):
-                    if low[-i] < current_price:  # Only support below current price
-                        recent_lows.append(low[-i])
+            # Volatility risk
+            if 'atr' in analysis:
+                current_atr = analysis['atr'].iloc[-1]
+                avg_atr = analysis['atr'].tail(20).mean()
+                
+                if current_atr > avg_atr * 1.5:
+                    risk_factors.append('High volatility')
+                    risk_level = 'HIGH'
+                elif current_atr > avg_atr * 1.2:
+                    risk_factors.append('Elevated volatility')
+                    risk_level = 'MEDIUM'
             
-            # Return top 3 support levels
-            return sorted(set(recent_lows), reverse=True)[:3]
+            # RSI extremes
+            if 'rsi' in analysis:
+                rsi = analysis['rsi'].iloc[-1]
+                if rsi > 80 or rsi < 20:
+                    risk_factors.append('Extreme RSI levels')
+                    if risk_level == 'LOW':
+                        risk_level = 'MEDIUM'
             
-        except Exception:
-            return []
-    
-    def _generate_signals(self, indicators: Dict[str, Any], symbol: str) -> Optional[Dict[str, Any]]:
-        """Generate swing trading signals"""
-        try:
-            buy_score = 0
-            sell_score = 0
-            
-            # Current values
-            price = indicators['close']
-            sma_20 = indicators['sma_20']
-            sma_50 = indicators['sma_50']
-            ema_20 = indicators['ema_20']
-            macd = indicators['macd']
-            macd_signal = indicators['macd_signal']
-            macd_hist = indicators['macd_histogram']
-            rsi = indicators['rsi']
-            adx = indicators['adx']
-            plus_di = indicators['plus_di']
-            minus_di = indicators['minus_di']
-            
-            # Check trend strength first
-            if adx < self.params['min_trend_strength']:
-                return None  # No trade in weak trend conditions
-            
-            # Main trend signals (40% weight)
-            if price > sma_20 > sma_50:  # Bullish alignment
-                buy_score += 3
-            elif price < sma_20 < sma_50:  # Bearish alignment
-                sell_score += 3
-            
-            # MACD signals (25% weight)
-            if macd > macd_signal and macd_hist > 0:  # MACD bullish
-                buy_score += 2
-            elif macd < macd_signal and macd_hist < 0:  # MACD bearish
-                sell_score += 2
-            
-            # ADX/DI signals (20% weight)
-            if plus_di > minus_di and adx > 25:  # Strong bullish trend
-                buy_score += 1.5
-            elif minus_di > plus_di and adx > 25:  # Strong bearish trend
-                sell_score += 1.5
-            
-            # RSI confirmation (10% weight)
-            if 30 < rsi < 70:  # RSI in neutral zone
-                if rsi > 50:
-                    buy_score += 0.5
-                else:
-                    sell_score += 0.5
-            
-            # Momentum confirmation (5% weight)
-            if price > ema_20:
-                buy_score += 0.5
-            else:
-                sell_score += 0.5
-            
-            # Support/Resistance consideration
-            resistance_levels = indicators.get('resistance', [])
-            support_levels = indicators.get('support', [])
-            
-            # Reduce buy signal if near resistance
-            if resistance_levels and any(abs(price - r) / price < 0.005 for r in resistance_levels[:2]):
-                buy_score *= 0.7
-            
-            # Reduce sell signal if near support
-            if support_levels and any(abs(price - s) / price < 0.005 for s in support_levels[:2]):
-                sell_score *= 0.7
-            
-            # Determine signal
-            total_possible_score = 7.5
-            
-            if buy_score > sell_score and buy_score >= 4.5:
-                confidence = min(buy_score / total_possible_score, 0.9)
-                if confidence >= self.params['min_confidence']:
-                    return {
-                        'action': 'BUY',
-                        'confidence': confidence,
-                        'stop_loss_pips': self.params['stop_loss_pips'],
-                        'take_profit_pips': self.params['target_pips'],
-                        'signal_strength': buy_score,
-                        'indicators': indicators,
-                        'strategy': self.name,
-                        'timestamp': datetime.now(),
-                        'entry_reason': (f"Trend: {price>sma_20>sma_50}, MACD: {macd>macd_signal}, "
-                                       f"ADX: {adx:.1f}, RSI: {rsi:.1f}")
-                    }
-            
-            elif sell_score > buy_score and sell_score >= 4.5:
-                confidence = min(sell_score / total_possible_score, 0.9)
-                if confidence >= self.params['min_confidence']:
-                    return {
-                        'action': 'SELL',
-                        'confidence': confidence,
-                        'stop_loss_pips': self.params['stop_loss_pips'],
-                        'take_profit_pips': self.params['target_pips'],
-                        'signal_strength': sell_score,
-                        'indicators': indicators,
-                        'strategy': self.name,
-                        'timestamp': datetime.now(),
-                        'entry_reason': (f"Trend: {price<sma_20<sma_50}, MACD: {macd<macd_signal}, "
-                                       f"ADX: {adx:.1f}, RSI: {rsi:.1f}")
-                    }
-            
-            return None
-            
-        except Exception as e:
-            log_error("SwingStrategy", "Error generating signals", e)
-            return None
-    
-    def on_trade_opened(self, trade_info: Dict[str, Any]):
-        """Handle trade opened event"""
-        try:
-            symbol = trade_info.get('symbol')
-            self.active_positions[symbol] = {
-                'ticket': trade_info.get('ticket'),
-                'open_time': datetime.now(),
-                'open_price': trade_info.get('price'),
-                'action': trade_info.get('action')
-            }
-            
-            self.trades_this_week += 1
-            
-            log_info("SwingStrategy", 
-                    f"Swing trade opened: {symbol} {trade_info.get('action')} "
-                    f"@ {trade_info.get('price', 0):.5f}")
-            
-        except Exception as e:
-            log_error("SwingStrategy", "Error handling trade opened", e)
-    
-    def on_trade_closed(self, trade_info: Dict[str, Any]):
-        """Handle trade closed event"""
-        try:
-            symbol = trade_info.get('symbol')
-            if symbol in self.active_positions:
-                del self.active_positions[symbol]
-            
-            profit = trade_info.get('profit', 0)
-            if profit > 0:
-                self.wins_this_week += 1
-            
-            win_rate = (self.wins_this_week / self.trades_this_week * 100) if self.trades_this_week > 0 else 0
-            
-            log_info("SwingStrategy", 
-                    f"Swing trade closed: {symbol} "
-                    f"P&L: ${profit:.2f}, Win Rate: {win_rate:.1f}%")
-            
-        except Exception as e:
-            log_error("SwingStrategy", "Error handling trade closed", e)
-    
-    def get_strategy_info(self) -> Dict[str, Any]:
-        """Get strategy information and statistics"""
-        try:
-            win_rate = (self.wins_this_week / self.trades_this_week * 100) if self.trades_this_week > 0 else 0
+            # Support/Resistance proximity
+            if 'nearest_resistance' in analysis or 'nearest_support' in analysis:
+                current_price = rates['close'].iloc[-1]
+                
+                if analysis.get('nearest_resistance'):
+                    resistance_distance = abs(current_price - analysis['nearest_resistance']) / current_price
+                    if resistance_distance < 0.002:  # Within 0.2%
+                        risk_factors.append('Near resistance level')
+                        if risk_level == 'LOW':
+                            risk_level = 'MEDIUM'
+                
+                if analysis.get('nearest_support'):
+                    support_distance = abs(current_price - analysis['nearest_support']) / current_price
+                    if support_distance < 0.002:  # Within 0.2%
+                        risk_factors.append('Near support level')
+                        if risk_level == 'LOW':
+                            risk_level = 'MEDIUM'
             
             return {
-                'name': self.name,
-                'type': 'Swing Trading',
-                'timeframe': self.params['timeframe'],
-                'target_pips': self.params['target_pips'],
-                'stop_loss_pips': self.params['stop_loss_pips'],
-                'trades_this_week': self.trades_this_week,
-                'wins_this_week': self.wins_this_week,
-                'win_rate': win_rate,
-                'active_positions': len(self.active_positions),
-                'min_trend_strength': self.params['min_trend_strength'],
-                'status': 'Active'
+                'level': risk_level,
+                'factors': risk_factors,
+                'recommended_position_size': self._calculate_position_size(risk_level),
+                'max_risk_per_trade': '1-2%',
+                'assessment_time': datetime.now()
             }
             
         except Exception as e:
-            log_error("SwingStrategy", "Error getting strategy info", e)
-            return {'name': self.name, 'status': 'Error'}
+            self.logger.error(f"Error assessing risk: {e}")
+            return {'level': 'HIGH', 'factors': ['Assessment error']}
     
-    def reset_weekly_stats(self):
-        """Reset weekly statistics"""
-        self.trades_this_week = 0
-        self.wins_this_week = 0
-        log_info("SwingStrategy", "Weekly statistics reset")
+    def _calculate_position_size(self, risk_level: str) -> float:
+        """Calculate appropriate position size"""
+        base_volume = self.params['volume']
+        
+        if risk_level == 'LOW':
+            return base_volume
+        elif risk_level == 'MEDIUM':
+            return base_volume * 0.7
+        else:  # HIGH
+            return base_volume * 0.5
+    
+    def get_strategy_info(self) -> Dict[str, any]:
+        """Get strategy information"""
+        return {
+            'name': self.name,
+            'type': 'Swing Trading',
+            'timeframe': self.params['timeframe'],
+            'description': 'Medium-term trend following with pullback entries',
+            'risk_level': 'Medium',
+            'avg_trade_duration': '4-24 hours',
+            'profit_target': f"Risk:Reward 1:{self.params['take_profit_ratio']}",
+            'stop_loss': f"{self.params['stop_loss_atr']} * ATR",
+            'max_positions': self.params['max_positions'],
+            'current_trend': self.trend_direction
+        }

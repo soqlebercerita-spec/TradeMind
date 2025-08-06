@@ -1,312 +1,390 @@
 
 """
 Arbitrage Strategy for AuraTrade Bot
-Cross-broker and cross-instrument arbitrage opportunities
+High-frequency arbitrage opportunities detection
 """
 
-import numpy as np
 import pandas as pd
+import numpy as np
+from typing import Dict, List, Optional, Tuple
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Any, Tuple
-from utils.logger import Logger, log_info, log_error
+from utils.logger import Logger
 
 class ArbitrageStrategy:
-    """Arbitrage trading strategy for price discrepancies"""
+    """Arbitrage strategy for price differences exploitation"""
     
-    def __init__(self):
+    def __init__(self, params: Dict = None):
+        self.name = "Arbitrage"
         self.logger = Logger().get_logger()
-        self.name = "Arbitrage Strategy"
         
-        # Strategy parameters
+        # Default parameters
         self.params = {
-            'min_spread_profit': 0.5,    # Minimum spread profit in pips
-            'max_execution_delay': 2,     # Maximum execution delay in seconds
-            'correlation_threshold': 0.85, # Minimum correlation for pairs
-            'min_confidence': 0.8,        # High confidence required
-            'risk_per_trade': 0.5,       # Lower risk for arbitrage
-            'max_positions': 2,           # Max simultaneous arbitrage positions
+            'min_spread_pips': 2.0,
+            'max_spread_pips': 10.0,
+            'correlation_threshold': 0.8,
+            'price_difference_threshold': 0.0001,
+            'max_hold_time': 300,  # 5 minutes
+            'symbols_pair': ['EURUSD', 'GBPUSD'],
+            'volume': 0.01,
+            'stop_loss_pips': 10,
+            'take_profit_pips': 5
         }
         
-        # Arbitrage pairs and correlations
-        self.arbitrage_pairs = {
-            'EURUSD_GBPUSD': ['EURUSD', 'GBPUSD'],
-            'XAUUSD_XAGUSD': ['XAUUSD', 'XAGUSD'],
-            'BTCUSD_ETHUSD': ['BTCUSD', 'ETHUSD']
-        }
+        if params:
+            self.params.update(params)
+            
+        self.active_opportunities = []
+        self.correlation_data = {}
+        self.price_history = {}
         
-        # Performance tracking
-        self.active_arbitrage = {}
-        self.arbitrage_count = 0
-        self.successful_arbitrage = 0
-        
-        log_info("ArbitrageStrategy", "Arbitrage strategy initialized")
+        self.logger.info(f"Arbitrage strategy initialized with params: {self.params}")
     
-    def analyze(self, symbols_data: Dict[str, pd.DataFrame]) -> Optional[Dict[str, Any]]:
-        """Analyze multiple symbols for arbitrage opportunities"""
+    def analyze_market(self, market_data: Dict) -> Dict[str, any]:
+        """Analyze market for arbitrage opportunities"""
         try:
-            if len(symbols_data) < 2:
-                return None
+            signals = []
+            opportunities = []
             
-            # Check each arbitrage pair
-            for pair_name, symbols in self.arbitrage_pairs.items():
-                if all(symbol in symbols_data for symbol in symbols):
-                    opportunity = self._check_arbitrage_opportunity(
-                        pair_name, symbols, symbols_data
-                    )
-                    if opportunity:
-                        return opportunity
+            # Update price history
+            self._update_price_history(market_data)
             
-            # Check correlation-based opportunities
-            correlation_opportunity = self._check_correlation_arbitrage(symbols_data)
-            if correlation_opportunity:
-                return correlation_opportunity
+            # Check for price discrepancies
+            price_discrepancies = self._detect_price_discrepancies(market_data)
             
-            return None
+            # Check correlation arbitrage
+            correlation_opps = self._detect_correlation_arbitrage(market_data)
+            
+            # Check cross-pair arbitrage
+            cross_pair_opps = self._detect_cross_pair_arbitrage(market_data)
+            
+            opportunities.extend(price_discrepancies)
+            opportunities.extend(correlation_opps)
+            opportunities.extend(cross_pair_opps)
+            
+            # Generate signals from opportunities
+            for opp in opportunities:
+                if self._validate_opportunity(opp):
+                    signals.append({
+                        'action': opp['action'],
+                        'symbol': opp['symbol'],
+                        'confidence': opp['confidence'],
+                        'reason': f"Arbitrage: {opp['type']}",
+                        'entry_price': opp['entry_price'],
+                        'stop_loss': opp['stop_loss'],
+                        'take_profit': opp['take_profit'],
+                        'volume': self.params['volume'],
+                        'urgency': 'high',  # Arbitrage opportunities are time-sensitive
+                        'max_hold_time': self.params['max_hold_time']
+                    })
+            
+            return {
+                'signals': signals,
+                'opportunities': opportunities,
+                'strategy': self.name,
+                'timestamp': datetime.now(),
+                'market_conditions': self._assess_market_conditions(market_data)
+            }
             
         except Exception as e:
-            log_error("ArbitrageStrategy", "Error analyzing arbitrage opportunities", e)
-            return None
+            self.logger.error(f"Error in arbitrage market analysis: {e}")
+            return {'signals': [], 'opportunities': []}
     
-    def _check_arbitrage_opportunity(self, pair_name: str, symbols: List[str], 
-                                   symbols_data: Dict[str, pd.DataFrame]) -> Optional[Dict[str, Any]]:
-        """Check for arbitrage opportunity between specific pairs"""
+    def _update_price_history(self, market_data: Dict):
+        """Update price history for analysis"""
         try:
-            symbol1, symbol2 = symbols
-            data1 = symbols_data[symbol1]
-            data2 = symbols_data[symbol2]
+            timestamp = datetime.now()
             
-            if data1.empty or data2.empty or len(data1) < 20 or len(data2) < 20:
-                return None
+            for symbol, data in market_data.items():
+                if symbol not in self.price_history:
+                    self.price_history[symbol] = []
+                
+                # Add current price data
+                self.price_history[symbol].append({
+                    'timestamp': timestamp,
+                    'bid': data.get('bid', 0),
+                    'ask': data.get('ask', 0),
+                    'spread': data.get('ask', 0) - data.get('bid', 0)
+                })
+                
+                # Keep only last 1000 entries
+                if len(self.price_history[symbol]) > 1000:
+                    self.price_history[symbol] = self.price_history[symbol][-1000:]
+                    
+        except Exception as e:
+            self.logger.error(f"Error updating price history: {e}")
+    
+    def _detect_price_discrepancies(self, market_data: Dict) -> List[Dict]:
+        """Detect price discrepancies between similar instruments"""
+        opportunities = []
+        
+        try:
+            # Check for unusual spreads
+            for symbol, data in market_data.items():
+                current_spread = data.get('ask', 0) - data.get('bid', 0)
+                
+                if symbol in self.price_history and len(self.price_history[symbol]) > 10:
+                    # Calculate average spread
+                    recent_spreads = [h['spread'] for h in self.price_history[symbol][-10:]]
+                    avg_spread = np.mean(recent_spreads)
+                    
+                    # If current spread is unusually wide, it might be an opportunity
+                    if current_spread > avg_spread * 2:
+                        opportunities.append({
+                            'type': 'wide_spread',
+                            'symbol': symbol,
+                            'action': 'buy' if data.get('bid', 0) < avg_spread else 'sell',
+                            'confidence': 0.7,
+                            'entry_price': data.get('bid' if data.get('bid', 0) < avg_spread else 'ask', 0),
+                            'stop_loss': data.get('bid', 0) - (self.params['stop_loss_pips'] * 0.0001),
+                            'take_profit': data.get('ask', 0) + (self.params['take_profit_pips'] * 0.0001),
+                            'expected_profit_pips': self.params['take_profit_pips']
+                        })
+                        
+        except Exception as e:
+            self.logger.error(f"Error detecting price discrepancies: {e}")
             
-            # Get current prices
-            price1 = data1['close'].iloc[-1]
-            price2 = data2['close'].iloc[-1]
+        return opportunities
+    
+    def _detect_correlation_arbitrage(self, market_data: Dict) -> List[Dict]:
+        """Detect arbitrage opportunities based on correlation"""
+        opportunities = []
+        
+        try:
+            symbols = list(market_data.keys())
             
-            # Calculate normalized prices and correlation
-            returns1 = data1['close'].pct_change().dropna()
-            returns2 = data2['close'].pct_change().dropna()
+            # Check pairs for correlation arbitrage
+            for i in range(len(symbols)):
+                for j in range(i + 1, len(symbols)):
+                    symbol1, symbol2 = symbols[i], symbols[j]
+                    
+                    # Calculate correlation if enough history
+                    if (symbol1 in self.price_history and symbol2 in self.price_history and
+                        len(self.price_history[symbol1]) > 20 and len(self.price_history[symbol2]) > 20):
+                        
+                        correlation = self._calculate_correlation(symbol1, symbol2)
+                        
+                        if abs(correlation) > self.params['correlation_threshold']:
+                            # Check if prices are diverging from correlation
+                            divergence = self._check_correlation_divergence(symbol1, symbol2, market_data)
+                            
+                            if divergence:
+                                opportunities.append(divergence)
+                                
+        except Exception as e:
+            self.logger.error(f"Error detecting correlation arbitrage: {e}")
             
-            if len(returns1) < 10 or len(returns2) < 10:
-                return None
+        return opportunities
+    
+    def _detect_cross_pair_arbitrage(self, market_data: Dict) -> List[Dict]:
+        """Detect triangular arbitrage opportunities"""
+        opportunities = []
+        
+        try:
+            # Example: EURUSD, GBPUSD, EURGBP
+            required_pairs = ['EURUSD', 'GBPUSD', 'EURGBP']
             
-            # Align the series
-            min_length = min(len(returns1), len(returns2))
-            correlation = np.corrcoef(returns1.iloc[-min_length:], 
-                                    returns2.iloc[-min_length:])[0, 1]
+            if all(pair in market_data for pair in required_pairs):
+                eur_usd = market_data['EURUSD']
+                gbp_usd = market_data['GBPUSD']
+                eur_gbp = market_data['EURGBP']
+                
+                # Calculate synthetic EURGBP from EURUSD/GBPUSD
+                synthetic_eur_gbp = eur_usd.get('bid', 0) / gbp_usd.get('ask', 0)
+                actual_eur_gbp = eur_gbp.get('bid', 0)
+                
+                # Check for arbitrage opportunity
+                price_diff = abs(synthetic_eur_gbp - actual_eur_gbp)
+                
+                if price_diff > self.params['price_difference_threshold']:
+                    if synthetic_eur_gbp > actual_eur_gbp:
+                        # Buy EURGBP, sell synthetic
+                        opportunities.append({
+                            'type': 'triangular_arbitrage',
+                            'symbol': 'EURGBP',
+                            'action': 'buy',
+                            'confidence': 0.8,
+                            'entry_price': actual_eur_gbp,
+                            'stop_loss': actual_eur_gbp - (self.params['stop_loss_pips'] * 0.0001),
+                            'take_profit': synthetic_eur_gbp,
+                            'expected_profit_pips': price_diff * 10000
+                        })
+                    else:
+                        # Sell EURGBP, buy synthetic
+                        opportunities.append({
+                            'type': 'triangular_arbitrage',
+                            'symbol': 'EURGBP',
+                            'action': 'sell',
+                            'confidence': 0.8,
+                            'entry_price': actual_eur_gbp,
+                            'stop_loss': actual_eur_gbp + (self.params['stop_loss_pips'] * 0.0001),
+                            'take_profit': synthetic_eur_gbp,
+                            'expected_profit_pips': price_diff * 10000
+                        })
+                        
+        except Exception as e:
+            self.logger.error(f"Error detecting cross pair arbitrage: {e}")
+            
+        return opportunities
+    
+    def _calculate_correlation(self, symbol1: str, symbol2: str) -> float:
+        """Calculate price correlation between two symbols"""
+        try:
+            if (symbol1 not in self.price_history or symbol2 not in self.price_history or
+                len(self.price_history[symbol1]) < 20 or len(self.price_history[symbol2]) < 20):
+                return 0.0
+            
+            # Get last 20 mid prices for each symbol
+            prices1 = [(h['bid'] + h['ask']) / 2 for h in self.price_history[symbol1][-20:]]
+            prices2 = [(h['bid'] + h['ask']) / 2 for h in self.price_history[symbol2][-20:]]
+            
+            # Calculate percentage changes
+            changes1 = np.diff(prices1) / prices1[:-1]
+            changes2 = np.diff(prices2) / prices2[:-1]
+            
+            # Calculate correlation
+            correlation = np.corrcoef(changes1, changes2)[0, 1]
+            
+            return correlation if not np.isnan(correlation) else 0.0
+            
+        except Exception as e:
+            self.logger.error(f"Error calculating correlation: {e}")
+            return 0.0
+    
+    def _check_correlation_divergence(self, symbol1: str, symbol2: str, market_data: Dict) -> Optional[Dict]:
+        """Check if correlated pairs are diverging"""
+        try:
+            correlation = self._calculate_correlation(symbol1, symbol2)
             
             if abs(correlation) < self.params['correlation_threshold']:
                 return None
             
-            # Calculate price ratio and check for divergence
-            ratio_series = (data1['close'] / data2['close']).dropna()
-            if len(ratio_series) < 20:
-                return None
-            
-            current_ratio = ratio_series.iloc[-1]
-            mean_ratio = ratio_series.rolling(20).mean().iloc[-1]
-            std_ratio = ratio_series.rolling(20).std().iloc[-1]
-            
-            # Check for significant divergence
-            z_score = (current_ratio - mean_ratio) / std_ratio if std_ratio > 0 else 0
-            
-            if abs(z_score) > 2:  # Significant divergence
-                # Determine trade direction
-                if z_score > 2:  # Ratio too high, short symbol1, long symbol2
-                    action1, action2 = 'SELL', 'BUY'
-                    confidence = min(0.95, 0.8 + abs(z_score) * 0.05)
-                else:  # Ratio too low, long symbol1, short symbol2
-                    action1, action2 = 'BUY', 'SELL'
-                    confidence = min(0.95, 0.8 + abs(z_score) * 0.05)
+            # Get current price changes
+            if (len(self.price_history[symbol1]) > 1 and len(self.price_history[symbol2]) > 1):
                 
-                if confidence >= self.params['min_confidence']:
+                # Calculate recent price movements
+                price1_change = ((market_data[symbol1]['bid'] + market_data[symbol1]['ask']) / 2 - 
+                               (self.price_history[symbol1][-2]['bid'] + self.price_history[symbol1][-2]['ask']) / 2)
+                
+                price2_change = ((market_data[symbol2]['bid'] + market_data[symbol2]['ask']) / 2 - 
+                               (self.price_history[symbol2][-2]['bid'] + self.price_history[symbol2][-2]['ask']) / 2)
+                
+                # Check if movements are diverging from expected correlation
+                expected_direction = 1 if correlation > 0 else -1
+                actual_direction = 1 if (price1_change * price2_change) > 0 else -1
+                
+                if expected_direction != actual_direction and abs(price1_change) > self.params['price_difference_threshold']:
+                    # Arbitrage opportunity detected
+                    stronger_symbol = symbol1 if abs(price1_change) > abs(price2_change) else symbol2
+                    weaker_symbol = symbol2 if stronger_symbol == symbol1 else symbol1
+                    
                     return {
-                        'action': 'ARBITRAGE',
-                        'pair_name': pair_name,
-                        'symbol1': symbol1,
-                        'symbol2': symbol2,
-                        'action1': action1,
-                        'action2': action2,
-                        'confidence': confidence,
-                        'z_score': z_score,
-                        'correlation': correlation,
-                        'current_ratio': current_ratio,
-                        'mean_ratio': mean_ratio,
-                        'strategy': self.name,
-                        'timestamp': datetime.now(),
-                        'entry_reason': f"Ratio divergence: {z_score:.2f} std devs"
+                        'type': 'correlation_divergence',
+                        'symbol': weaker_symbol,
+                        'action': 'buy' if price1_change < 0 else 'sell',
+                        'confidence': min(0.9, abs(correlation)),
+                        'entry_price': market_data[weaker_symbol]['ask' if price1_change < 0 else 'bid'],
+                        'stop_loss': market_data[weaker_symbol]['ask' if price1_change < 0 else 'bid'] * (1 + (self.params['stop_loss_pips'] * 0.0001)),
+                        'take_profit': market_data[weaker_symbol]['ask' if price1_change < 0 else 'bid'] * (1 + (self.params['take_profit_pips'] * 0.0001)),
+                        'expected_profit_pips': self.params['take_profit_pips']
                     }
-            
+                    
             return None
             
         except Exception as e:
-            log_error("ArbitrageStrategy", f"Error checking {pair_name} arbitrage", e)
+            self.logger.error(f"Error checking correlation divergence: {e}")
             return None
     
-    def _check_correlation_arbitrage(self, symbols_data: Dict[str, pd.DataFrame]) -> Optional[Dict[str, Any]]:
-        """Check for correlation-based arbitrage opportunities"""
+    def _validate_opportunity(self, opportunity: Dict) -> bool:
+        """Validate arbitrage opportunity"""
         try:
-            symbols = list(symbols_data.keys())
+            # Check minimum profit threshold
+            if opportunity.get('expected_profit_pips', 0) < self.params['min_spread_pips']:
+                return False
             
-            # Check all pairs of symbols
-            for i, symbol1 in enumerate(symbols):
-                for symbol2 in symbols[i+1:]:
-                    if symbol1 == symbol2:
-                        continue
-                    
-                    data1 = symbols_data[symbol1]
-                    data2 = symbols_data[symbol2]
-                    
-                    if data1.empty or data2.empty or len(data1) < 30 or len(data2) < 30:
-                        continue
-                    
-                    # Calculate correlation
-                    returns1 = data1['close'].pct_change().dropna()
-                    returns2 = data2['close'].pct_change().dropna()
-                    
-                    min_length = min(len(returns1), len(returns2))
-                    if min_length < 20:
-                        continue
-                    
-                    correlation = np.corrcoef(returns1.iloc[-min_length:], 
-                                           returns2.iloc[-min_length:])[0, 1]
-                    
-                    # Look for temporary correlation breakdown
-                    short_correlation = np.corrcoef(returns1.iloc[-5:], 
-                                                  returns2.iloc[-5:])[0, 1]
-                    
-                    if (abs(correlation) > self.params['correlation_threshold'] and 
-                        abs(short_correlation) < 0.3):  # Correlation breakdown
-                        
-                        # Calculate expected vs actual price movement
-                        recent_return1 = returns1.iloc[-1]
-                        recent_return2 = returns2.iloc[-1]
-                        
-                        expected_return2 = recent_return1 * correlation
-                        return_difference = recent_return2 - expected_return2
-                        
-                        if abs(return_difference) > 0.002:  # Significant difference
-                            # Determine trade direction based on correlation
-                            if correlation > 0:  # Positive correlation
-                                if return_difference > 0:  # Symbol2 moved too much up
-                                    action1, action2 = 'BUY', 'SELL'
-                                else:  # Symbol2 moved too much down
-                                    action1, action2 = 'SELL', 'BUY'
-                            else:  # Negative correlation
-                                if return_difference > 0:  # Symbol2 moved up (should move down)
-                                    action1, action2 = 'SELL', 'SELL'
-                                else:  # Symbol2 moved down (should move up)
-                                    action1, action2 = 'BUY', 'BUY'
-                            
-                            confidence = min(0.9, 0.7 + abs(return_difference) * 100)
-                            
-                            if confidence >= self.params['min_confidence']:
-                                return {
-                                    'action': 'CORRELATION_ARBITRAGE',
-                                    'pair_name': f"{symbol1}_{symbol2}",
-                                    'symbol1': symbol1,
-                                    'symbol2': symbol2,
-                                    'action1': action1,
-                                    'action2': action2,
-                                    'confidence': confidence,
-                                    'correlation': correlation,
-                                    'short_correlation': short_correlation,
-                                    'return_difference': return_difference,
-                                    'strategy': self.name,
-                                    'timestamp': datetime.now(),
-                                    'entry_reason': f"Correlation breakdown: {correlation:.2f} vs {short_correlation:.2f}"
-                                }
+            # Check maximum risk
+            if opportunity.get('expected_profit_pips', 0) > self.params['max_spread_pips']:
+                return False
             
-            return None
+            # Check confidence level
+            if opportunity.get('confidence', 0) < 0.6:
+                return False
+            
+            # Check if opportunity is not too stale
+            if hasattr(opportunity, 'timestamp'):
+                age = datetime.now() - opportunity['timestamp']
+                if age.total_seconds() > 10:  # 10 seconds max
+                    return False
+                    
+            return True
             
         except Exception as e:
-            log_error("ArbitrageStrategy", "Error checking correlation arbitrage", e)
-            return None
+            self.logger.error(f"Error validating opportunity: {e}")
+            return False
     
-    def calculate_arbitrage_size(self, symbol1: str, symbol2: str, 
-                               account_balance: float) -> Tuple[float, float]:
-        """Calculate appropriate position sizes for arbitrage"""
+    def _assess_market_conditions(self, market_data: Dict) -> Dict[str, any]:
+        """Assess current market conditions for arbitrage"""
         try:
-            # Use smaller position sizes for arbitrage
-            risk_amount = account_balance * (self.params['risk_per_trade'] / 100)
-            
-            # Simple equal risk allocation
-            # In practice, this should consider contract sizes and correlations
-            base_size = min(0.1, risk_amount / 1000)  # Conservative sizing
-            
-            return base_size, base_size
-            
-        except Exception as e:
-            log_error("ArbitrageStrategy", "Error calculating arbitrage size", e)
-            return 0.01, 0.01
-    
-    def on_arbitrage_opened(self, arbitrage_info: Dict[str, Any]):
-        """Handle arbitrage position opened"""
-        try:
-            pair_name = arbitrage_info.get('pair_name')
-            self.active_arbitrage[pair_name] = {
-                'open_time': datetime.now(),
-                'symbol1': arbitrage_info.get('symbol1'),
-                'symbol2': arbitrage_info.get('symbol2'),
-                'action1': arbitrage_info.get('action1'),
-                'action2': arbitrage_info.get('action2'),
-                'confidence': arbitrage_info.get('confidence')
+            conditions = {
+                'volatility': 'medium',
+                'spread_conditions': 'normal',
+                'arbitrage_opportunities': len(self.active_opportunities),
+                'market_hours': self._get_market_session(),
+                'recommended_exposure': self.params['volume']
             }
             
-            self.arbitrage_count += 1
+            # Calculate average spreads
+            total_spread = 0
+            symbol_count = 0
             
-            log_info("ArbitrageStrategy", 
-                    f"Arbitrage opened: {pair_name} - "
-                    f"{arbitrage_info.get('symbol1')} {arbitrage_info.get('action1')}, "
-                    f"{arbitrage_info.get('symbol2')} {arbitrage_info.get('action2')}")
+            for symbol, data in market_data.items():
+                spread = data.get('ask', 0) - data.get('bid', 0)
+                total_spread += spread
+                symbol_count += 1
+            
+            if symbol_count > 0:
+                avg_spread = total_spread / symbol_count
+                if avg_spread > 0.0003:  # 3 pips average
+                    conditions['spread_conditions'] = 'wide'
+                elif avg_spread < 0.0001:  # 1 pip average
+                    conditions['spread_conditions'] = 'tight'
+            
+            return conditions
             
         except Exception as e:
-            log_error("ArbitrageStrategy", "Error handling arbitrage opened", e)
+            self.logger.error(f"Error assessing market conditions: {e}")
+            return {'volatility': 'unknown', 'spread_conditions': 'unknown'}
     
-    def on_arbitrage_closed(self, arbitrage_info: Dict[str, Any]):
-        """Handle arbitrage position closed"""
+    def _get_market_session(self) -> str:
+        """Determine current market session"""
         try:
-            pair_name = arbitrage_info.get('pair_name')
-            if pair_name in self.active_arbitrage:
-                del self.active_arbitrage[pair_name]
+            now = datetime.now()
+            hour = now.hour
             
-            total_profit = arbitrage_info.get('total_profit', 0)
-            if total_profit > 0:
-                self.successful_arbitrage += 1
-            
-            success_rate = (self.successful_arbitrage / self.arbitrage_count * 100) if self.arbitrage_count > 0 else 0
-            
-            log_info("ArbitrageStrategy", 
-                    f"Arbitrage closed: {pair_name} - "
-                    f"Total P&L: ${total_profit:.2f}, Success Rate: {success_rate:.1f}%")
-            
-        except Exception as e:
-            log_error("ArbitrageStrategy", "Error handling arbitrage closed", e)
+            # Simplified market sessions (UTC)
+            if 22 <= hour or hour < 6:
+                return 'sydney'
+            elif 6 <= hour < 8:
+                return 'tokyo_open'
+            elif 8 <= hour < 14:
+                return 'london'
+            elif 14 <= hour < 22:
+                return 'new_york'
+            else:
+                return 'off_hours'
+                
+        except:
+            return 'unknown'
     
-    def get_strategy_info(self) -> Dict[str, Any]:
-        """Get strategy information and statistics"""
-        try:
-            success_rate = (self.successful_arbitrage / self.arbitrage_count * 100) if self.arbitrage_count > 0 else 0
-            
-            return {
-                'name': self.name,
-                'type': 'Arbitrage',
-                'arbitrage_pairs': list(self.arbitrage_pairs.keys()),
-                'total_arbitrage': self.arbitrage_count,
-                'successful_arbitrage': self.successful_arbitrage,
-                'success_rate': success_rate,
-                'active_arbitrage': len(self.active_arbitrage),
-                'max_positions': self.params['max_positions'],
-                'min_spread_profit': self.params['min_spread_profit'],
-                'correlation_threshold': self.params['correlation_threshold'],
-                'status': 'Active' if len(self.active_arbitrage) < self.params['max_positions'] else 'Full'
-            }
-            
-        except Exception as e:
-            log_error("ArbitrageStrategy", "Error getting strategy info", e)
-            return {'name': self.name, 'status': 'Error'}
-    
-    def reset_statistics(self):
-        """Reset arbitrage statistics"""
-        self.arbitrage_count = 0
-        self.successful_arbitrage = 0
-        log_info("ArbitrageStrategy", "Arbitrage statistics reset")
+    def get_strategy_info(self) -> Dict[str, any]:
+        """Get strategy information"""
+        return {
+            'name': self.name,
+            'type': 'Arbitrage',
+            'description': 'High-frequency arbitrage opportunities detection',
+            'risk_level': 'Low-Medium',
+            'avg_trade_duration': f"{self.params['max_hold_time']} seconds",
+            'profit_target': f"{self.params['take_profit_pips']} pips",
+            'stop_loss': f"{self.params['stop_loss_pips']} pips",
+            'active_opportunities': len(self.active_opportunities),
+            'pairs_monitored': self.params['symbols_pair']
+        }
