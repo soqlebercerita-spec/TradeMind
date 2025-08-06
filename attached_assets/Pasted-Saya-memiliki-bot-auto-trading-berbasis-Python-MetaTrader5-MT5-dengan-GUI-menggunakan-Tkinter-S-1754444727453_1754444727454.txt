@@ -1,0 +1,136 @@
+Saya memiliki bot auto trading berbasis Python + MetaTrader5 (MT5) dengan GUI menggunakan Tkinter. Saat ini, bot ini sudah berjalan sebagian, namun masih belum sempurna, ada beberapa fitur yang tidak bekerja optimal, GUI yang kurang rapi, dan beberapa indikator atau sistem belum berjalan sesuai rencana.
+Saya ingin AI memperbaiki seluruh sistem yang sudah saya buat tanpa membuat ulang dari nol, melainkan dengan cara meningkatkan dan memperbaiki bagian-bagian yang sudah ada.
+
+Berikut adalah list lengkap fitur yang sudah ada dan yang harus diperbaiki/ditingkatkan, termasuk sistem GUI, indikator teknikal, strategi trading, serta logika bot yang harus dipastikan berjalan sempurna:
+
+🧠 1. Sistem Bot & Strategi Utama
+Fokus utama: Scalping aman dan cepat profit tanpa loss besar
+
+Gunakan kombinasi sinyal cepat dan lambat:
+
+Sinyal cepat: Price Action, MA10, candle momentum → untuk entry awal
+
+Sinyal lambat: EMA50, RSI → untuk validasi arah trend
+
+Strategi teknikal utama:
+
+Entry cepat jika sinyal cepat setuju, dan arah trend didukung indikator lambat
+
+Jangan tunggu semua indikator setuju → gunakan kombinasi yang cukup meyakinkan
+
+Auto-analisis tren dan momentum
+
+Strategi Scalping + Arbitrage Hybrid
+
+Support HFT (High-Frequency Trading) dan Switching Strategy dari GUI
+
+📈 2. Indikator yang Digunakan & Harus Bekerja
+Pastikan semua indikator berikut ini aktif, akurat, dan bekerja secara real-time:
+
+Moving Average (MA10)
+
+Exponential Moving Average (EMA50)
+
+Bollinger Bands (BB)
+
+RSI (Relative Strength Index)
+
+MACD
+
+Weighted Moving Average (WMA)
+
+Stochastic Oscillator
+
+ATR (Average True Range)
+
+Fibonacci Retracement (otomatis)
+
+Pivot Point (Daily/Weekly)
+
+Support & Resistance (Otomatis)
+
+💻 3. Fitur GUI yang Harus Ada dan Bekerja
+GUI harus rapi, modern, terstruktur, dan user-friendly. Seluruh elemen GUI harus bisa digunakan dan berfungsi dengan baik.
+
+Isi GUI yang wajib ada:
+
+Tombol Start/Stop Bot
+
+Pilihan Strategi: Scalping, HFT, Arbitrage, Hybrid
+
+Input TP/SL (Scalping & Umum)
+
+Info Akun:
+
+Balance, Equity, Free Margin, Leverage
+
+Live Report:
+
+Real-Time Profit/Loss (floating + closed)
+
+Daftar posisi terbuka (open orders)
+
+Tombol manual Close Buy/Sell
+
+Ringkasan order saat bot dihentikan
+
+Auto-export ke CSV
+
+Log aktivitas
+
+Auto-detect symbol aktif (contoh: XAUUSDm) tanpa error
+
+Tampilan chart indikator (opsional jika memungkinkan)
+
+Dropdown untuk Timeframe & Symbol
+
+🔄 4. Sistem & Logika Tambahan
+Auto Take Profit / Stop Loss berbasis persentase dan nominal
+
+Limit order maksimal 10 per sesi trading
+
+Bot tidak open order saat ada lonjakan harga drastis atau news berdampak tinggi
+
+Tambahkan sistem deteksi news besar (opsional jika memungkinkan)
+
+Trailing Stop (jika sudah profit, SL ikut naik)
+
+Telegram Notifikasi (open/close order, profit/loss)
+
+Anti re-entry order jika posisi masih terbuka
+
+Hindari false signal: kombinasi konfirmasi candle dan indikator
+
+🛠️ 5. Bug Fix & Perbaikan Sistem
+Tolong lakukan perbaikan berikut:
+
+Perbaiki error: Symbol XAUUSDm tetap tidak aktif di MT5
+
+Tambahkan auto-detection symbol aktif dari Market Watch
+
+Perbaiki semua elemen GUI yang semrawut: ukuran, posisi widget, logika tombol
+
+Pastikan semua indikator di atas berjalan
+
+Pastikan bot tidak freeze saat runtime (threading harus stabil)
+
+Perbaiki logic trading yang kadang tidak sesuai arah trend
+
+Pastikan log export dan notifikasi berjalan akurat
+
+Buat log order terpisah untuk BUY & SELL (dalam format CSV)
+
+Buat resume ringkasan profit saat bot berhenti
+
+Pisahkan data scalping dan umum (bila memungkinkan)
+
+Optimalkan penggunaan thread agar GUI tetap responsif
+
+Semua sistem harus kompatibel dengan MT5 terbaru
+
+📌 Catatan Penting
+Jangan buat bot baru dari nol
+
+Fokus hanya pada perbaikan dan peningkatan sistem yang sudah ada
+
+Semua logika, strategi, dan indikator yang telah disebutkan harus diimplementasikan
