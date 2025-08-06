@@ -365,3 +365,214 @@ class ScalpingStrategy:
             'profit_target': f"{self.params['profit_target_pips']} pips",
             'stop_loss': f"{self.params['stop_loss_pips']} pips"
         }
+"""
+Scalping Strategy for AuraTrade Bot
+High-frequency short-term trading strategy
+"""
+
+import pandas as pd
+import numpy as np
+from typing import Dict, List, Any, Optional
+from datetime import datetime
+from utils.logger import Logger
+
+class ScalpingStrategy:
+    """High-frequency scalping strategy"""
+    
+    def __init__(self):
+        self.logger = Logger().get_logger()
+        self.name = "Scalping"
+        self.timeframe = "M1"
+        self.min_spread = 0.5  # Max spread in pips
+        self.max_spread = 3.0
+        
+        # Strategy parameters
+        self.rsi_period = 14
+        self.rsi_overbought = 70
+        self.rsi_oversold = 30
+        self.ma_fast = 5
+        self.ma_slow = 20
+        
+        # Risk parameters
+        self.tp_pips = 8
+        self.sl_pips = 12
+        self.max_positions = 3
+        
+        self.logger.info("Scalping Strategy initialized")
+    
+    def analyze(self, symbol: str, rates: pd.DataFrame, tick: Dict) -> Optional[Dict]:
+        """Analyze market and generate signals"""
+        try:
+            if len(rates) < 50:
+                return None
+            
+            # Calculate indicators
+            indicators = self._calculate_indicators(rates)
+            
+            # Check spread
+            spread = self._calculate_spread(tick, symbol)
+            if spread > self.max_spread:
+                return None
+            
+            # Generate signals
+            signals = self._generate_signals(rates, indicators, tick)
+            
+            return signals
+            
+        except Exception as e:
+            self.logger.error(f"Error in scalping analysis: {e}")
+            return None
+    
+    def _calculate_indicators(self, rates: pd.DataFrame) -> Dict:
+        """Calculate technical indicators"""
+        try:
+            close = rates['close']
+            high = rates['high']
+            low = rates['low']
+            
+            # RSI
+            rsi = self._calculate_rsi(close, self.rsi_period)
+            
+            # Moving averages
+            ma_fast = close.rolling(window=self.ma_fast).mean()
+            ma_slow = close.rolling(window=self.ma_slow).mean()
+            
+            # Bollinger Bands
+            bb_period = 20
+            bb_std = 2
+            bb_middle = close.rolling(window=bb_period).mean()
+            bb_std_val = close.rolling(window=bb_period).std()
+            bb_upper = bb_middle + (bb_std_val * bb_std)
+            bb_lower = bb_middle - (bb_std_val * bb_std)
+            
+            # MACD
+            ema_12 = close.ewm(span=12).mean()
+            ema_26 = close.ewm(span=26).mean()
+            macd_line = ema_12 - ema_26
+            signal_line = macd_line.ewm(span=9).mean()
+            macd_histogram = macd_line - signal_line
+            
+            return {
+                'rsi': rsi.iloc[-1] if not pd.isna(rsi.iloc[-1]) else 50,
+                'ma_fast': ma_fast.iloc[-1],
+                'ma_slow': ma_slow.iloc[-1],
+                'bb_upper': bb_upper.iloc[-1],
+                'bb_lower': bb_lower.iloc[-1],
+                'bb_middle': bb_middle.iloc[-1],
+                'macd_line': macd_line.iloc[-1],
+                'signal_line': signal_line.iloc[-1],
+                'macd_histogram': macd_histogram.iloc[-1]
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Error calculating indicators: {e}")
+            return {}
+    
+    def _calculate_rsi(self, prices: pd.Series, period: int) -> pd.Series:
+        """Calculate RSI indicator"""
+        delta = prices.diff()
+        gain = delta.where(delta > 0, 0).rolling(window=period).mean()
+        loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
+        rs = gain / loss
+        rsi = 100 - (100 / (1 + rs))
+        return rsi
+    
+    def _calculate_spread(self, tick: Dict, symbol: str) -> float:
+        """Calculate spread in pips"""
+        try:
+            spread = tick['ask'] - tick['bid']
+            # Convert to pips (assuming 5-digit quotes for most pairs)
+            if 'JPY' in symbol:
+                return spread * 100  # 3-digit quotes
+            else:
+                return spread * 10000  # 5-digit quotes
+        except:
+            return 999  # High value to block trading
+    
+    def _generate_signals(self, rates: pd.DataFrame, indicators: Dict, tick: Dict) -> Optional[Dict]:
+        """Generate trading signals"""
+        try:
+            current_price = rates['close'].iloc[-1]
+            rsi = indicators.get('rsi', 50)
+            ma_fast = indicators.get('ma_fast', current_price)
+            ma_slow = indicators.get('ma_slow', current_price)
+            bb_upper = indicators.get('bb_upper', current_price)
+            bb_lower = indicators.get('bb_lower', current_price)
+            macd_histogram = indicators.get('macd_histogram', 0)
+            
+            # Signal conditions
+            signals = []
+            
+            # RSI + MA Crossover (BUY)
+            if (rsi < self.rsi_oversold and 
+                ma_fast > ma_slow and 
+                current_price <= bb_lower and
+                macd_histogram > 0):
+                
+                signals.append({
+                    'action': 'buy',
+                    'confidence': 0.75,
+                    'tp_pips': self.tp_pips,
+                    'sl_pips': self.sl_pips,
+                    'volume': 0.01,
+                    'reason': 'RSI Oversold + MA Bullish + BB Lower + MACD Positive'
+                })
+            
+            # RSI + MA Crossover (SELL)
+            elif (rsi > self.rsi_overbought and 
+                  ma_fast < ma_slow and 
+                  current_price >= bb_upper and
+                  macd_histogram < 0):
+                
+                signals.append({
+                    'action': 'sell',
+                    'confidence': 0.75,
+                    'tp_pips': self.tp_pips,
+                    'sl_pips': self.sl_pips,
+                    'volume': 0.01,
+                    'reason': 'RSI Overbought + MA Bearish + BB Upper + MACD Negative'
+                })
+            
+            # Quick scalp on strong momentum
+            if len(rates) >= 5:
+                recent_closes = rates['close'].tail(5)
+                if recent_closes.is_monotonic_increasing and macd_histogram > 0.0001:
+                    signals.append({
+                        'action': 'buy',
+                        'confidence': 0.65,
+                        'tp_pips': 5,  # Quick profit
+                        'sl_pips': 8,
+                        'volume': 0.01,
+                        'reason': 'Strong Upward Momentum'
+                    })
+                elif recent_closes.is_monotonic_decreasing and macd_histogram < -0.0001:
+                    signals.append({
+                        'action': 'sell',
+                        'confidence': 0.65,
+                        'tp_pips': 5,  # Quick profit
+                        'sl_pips': 8,
+                        'volume': 0.01,
+                        'reason': 'Strong Downward Momentum'
+                    })
+            
+            # Return best signal
+            if signals:
+                return max(signals, key=lambda x: x['confidence'])
+            
+            return None
+            
+        except Exception as e:
+            self.logger.error(f"Error generating signals: {e}")
+            return None
+    
+    def get_strategy_info(self) -> Dict[str, Any]:
+        """Get strategy information"""
+        return {
+            'name': self.name,
+            'timeframe': self.timeframe,
+            'tp_pips': self.tp_pips,
+            'sl_pips': self.sl_pips,
+            'max_spread': self.max_spread,
+            'risk_level': 'High',
+            'description': 'High-frequency scalping with RSI, MA, and Bollinger Bands'
+        }

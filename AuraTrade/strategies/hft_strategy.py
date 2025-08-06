@@ -313,3 +313,127 @@ class HFTStrategy:
         self.winning_trades = 0
         self.tick_buffer.clear()
         self.logger.info("HFT strategy statistics reset")
+"""
+High Frequency Trading Strategy for AuraTrade Bot
+Ultra-fast trading strategy for quick profits
+"""
+
+import pandas as pd
+import numpy as np
+from typing import Dict, List, Any, Optional
+from datetime import datetime
+from utils.logger import Logger
+
+class HFTStrategy:
+    """High Frequency Trading strategy"""
+    
+    def __init__(self):
+        self.logger = Logger().get_logger()
+        self.name = "HFT"
+        self.timeframe = "M1"
+        
+        # Strategy parameters
+        self.max_spread = 1.5  # Very tight spread requirement
+        self.tp_pips = 3       # Quick profit target
+        self.sl_pips = 5       # Tight stop loss
+        
+        # Momentum parameters
+        self.momentum_period = 5
+        self.volatility_threshold = 0.001
+        
+        self.logger.info("HFT Strategy initialized")
+    
+    def analyze(self, symbol: str, rates: pd.DataFrame, tick: Dict) -> Optional[Dict]:
+        """Analyze market for HFT opportunities"""
+        try:
+            if len(rates) < 20:
+                return None
+            
+            # Check spread first
+            spread = self._calculate_spread(tick, symbol)
+            if spread > self.max_spread:
+                return None
+            
+            # Check volatility
+            volatility = self._calculate_volatility(rates)
+            if volatility < self.volatility_threshold:
+                return None
+            
+            # Look for momentum signals
+            signal = self._detect_momentum(rates, tick)
+            
+            return signal
+            
+        except Exception as e:
+            self.logger.error(f"Error in HFT analysis: {e}")
+            return None
+    
+    def _calculate_spread(self, tick: Dict, symbol: str) -> float:
+        """Calculate spread in pips"""
+        try:
+            spread = tick['ask'] - tick['bid']
+            if 'JPY' in symbol:
+                return spread * 100
+            else:
+                return spread * 10000
+        except:
+            return 999
+    
+    def _calculate_volatility(self, rates: pd.DataFrame) -> float:
+        """Calculate recent volatility"""
+        try:
+            returns = rates['close'].pct_change().tail(10)
+            return returns.std()
+        except:
+            return 0
+    
+    def _detect_momentum(self, rates: pd.DataFrame, tick: Dict) -> Optional[Dict]:
+        """Detect momentum for HFT"""
+        try:
+            close_prices = rates['close'].tail(self.momentum_period)
+            
+            # Check for strong momentum
+            if len(close_prices) < self.momentum_period:
+                return None
+            
+            price_change = (close_prices.iloc[-1] - close_prices.iloc[0]) / close_prices.iloc[0]
+            
+            # Strong upward momentum
+            if price_change > 0.0005:  # 0.05% move
+                return {
+                    'action': 'buy',
+                    'confidence': 0.7,
+                    'tp_pips': self.tp_pips,
+                    'sl_pips': self.sl_pips,
+                    'volume': 0.01,
+                    'reason': f'Strong upward momentum: {price_change:.4%}'
+                }
+            
+            # Strong downward momentum
+            elif price_change < -0.0005:
+                return {
+                    'action': 'sell',
+                    'confidence': 0.7,
+                    'tp_pips': self.tp_pips,
+                    'sl_pips': self.sl_pips,
+                    'volume': 0.01,
+                    'reason': f'Strong downward momentum: {price_change:.4%}'
+                }
+            
+            return None
+            
+        except Exception as e:
+            self.logger.error(f"Error detecting momentum: {e}")
+            return None
+    
+    def get_strategy_info(self) -> Dict[str, Any]:
+        """Get strategy information"""
+        return {
+            'name': self.name,
+            'timeframe': self.timeframe,
+            'tp_pips': self.tp_pips,
+            'sl_pips': self.sl_pips,
+            'max_spread': self.max_spread,
+            'risk_level': 'Very High',
+            'description': 'High frequency trading with momentum detection'
+        }

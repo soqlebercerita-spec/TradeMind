@@ -332,3 +332,56 @@ class TradingDashboard(QWidget):
         
         except Exception as e:
             self.logger.error(f"Error closing position {ticket}: {e}")
+"""
+Trading Dashboard for AuraTrade Bot
+Real-time trading dashboard with charts and metrics
+"""
+
+from PyQt5.QtWidgets import *
+from PyQt5.QtCore import *
+from PyQt5.QtGui import *
+import pandas as pd
+from typing import Dict, Any
+
+class TradingDashboard(QWidget):
+    """Real-time trading dashboard"""
+    
+    def __init__(self):
+        super().__init__()
+        self.init_ui()
+    
+    def init_ui(self):
+        """Initialize dashboard UI"""
+        layout = QVBoxLayout(self)
+        
+        # Dashboard content
+        self.metrics_widget = self.create_metrics_widget()
+        layout.addWidget(self.metrics_widget)
+    
+    def create_metrics_widget(self) -> QWidget:
+        """Create metrics display widget"""
+        widget = QGroupBox("Trading Metrics")
+        layout = QGridLayout(widget)
+        
+        # Placeholder metrics
+        self.balance_label = QLabel("Balance: $0.00")
+        self.profit_label = QLabel("P&L: $0.00")
+        self.trades_label = QLabel("Trades: 0")
+        self.win_rate_label = QLabel("Win Rate: 0%")
+        
+        layout.addWidget(self.balance_label, 0, 0)
+        layout.addWidget(self.profit_label, 0, 1)
+        layout.addWidget(self.trades_label, 1, 0)
+        layout.addWidget(self.win_rate_label, 1, 1)
+        
+        return widget
+    
+    def update_metrics(self, metrics: Dict[str, Any]):
+        """Update dashboard metrics"""
+        try:
+            self.balance_label.setText(f"Balance: ${metrics.get('balance', 0):.2f}")
+            self.profit_label.setText(f"P&L: ${metrics.get('profit', 0):.2f}")
+            self.trades_label.setText(f"Trades: {metrics.get('trades', 0)}")
+            self.win_rate_label.setText(f"Win Rate: {metrics.get('win_rate', 0):.1f}%")
+        except Exception as e:
+            pass

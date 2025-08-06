@@ -388,3 +388,52 @@ class ArbitrageStrategy:
             'active_opportunities': len(self.active_opportunities),
             'pairs_monitored': self.params['symbols_pair']
         }
+"""
+Arbitrage Strategy for AuraTrade Bot
+Price difference exploitation strategy
+"""
+
+import pandas as pd
+import numpy as np
+from typing import Dict, List, Any, Optional
+from utils.logger import Logger
+
+class ArbitrageStrategy:
+    """Arbitrage trading strategy"""
+    
+    def __init__(self):
+        self.logger = Logger().get_logger()
+        self.name = "Arbitrage"
+        self.timeframe = "M1"
+        
+        # Strategy parameters
+        self.max_spread = 2.0
+        self.tp_pips = 5
+        self.sl_pips = 10
+        
+        self.logger.info("Arbitrage Strategy initialized")
+    
+    def analyze(self, symbol: str, rates: pd.DataFrame, tick: Dict) -> Optional[Dict]:
+        """Analyze arbitrage opportunities"""
+        try:
+            if len(rates) < 10:
+                return None
+            
+            # Basic arbitrage logic placeholder
+            return None  # Requires multiple brokers
+            
+        except Exception as e:
+            self.logger.error(f"Error in arbitrage analysis: {e}")
+            return None
+    
+    def get_strategy_info(self) -> Dict[str, Any]:
+        """Get strategy information"""
+        return {
+            'name': self.name,
+            'timeframe': self.timeframe,
+            'tp_pips': self.tp_pips,
+            'sl_pips': self.sl_pips,
+            'max_spread': self.max_spread,
+            'risk_level': 'Low',
+            'description': 'Arbitrage trading strategy'
+        }

@@ -408,3 +408,124 @@ class PositionSizing:
         except Exception as e:
             log_error("PositionSizing", f"Error getting sizing recommendation: {e}", e)
             return {}
+"""
+Position Sizing Calculator for AuraTrade Bot
+Dynamic lot size calculation based on risk management
+"""
+
+from typing import Dict, Optional
+from utils.logger import Logger
+
+class PositionSizing:
+    """Dynamic position sizing based on risk management"""
+    
+    def __init__(self, mt5_connector):
+        self.logger = Logger().get_logger()
+        self.mt5_connector = mt5_connector
+        
+        # Default settings
+        self.default_risk_percent = 1.0  # 1% risk per trade
+        self.min_lot_size = 0.01
+        self.max_lot_size = 10.0
+        
+        self.logger.info("Position Sizing initialized")
+    
+    def calculate_position_size(self, symbol: str, risk_percent: float = None, 
+                              stop_loss_pips: float = 20) -> float:
+        """Calculate optimal position size based on risk"""
+        try:
+            if risk_percent is None:
+                risk_percent = self.default_risk_percent
+            
+            # Get account info
+            account_info = self.mt5_connector.get_account_info()
+            if not account_info:
+                return self.min_lot_size
+            
+            balance = account_info.get('balance', 0)
+            if balance <= 0:
+                return self.min_lot_size
+            
+            # Calculate risk amount in USD
+            risk_amount = balance * (risk_percent / 100)
+            
+            # Get symbol info
+            symbol_info = self.mt5_connector.get_symbol_info(symbol)
+            if not symbol_info:
+                return self.min_lot_size
+            
+            # Calculate pip value
+            pip_value = self.calculate_pip_value(symbol)
+            if pip_value <= 0:
+                return self.min_lot_size
+            
+            # Calculate position size
+            # Position Size = Risk Amount / (Stop Loss in Pips * Pip Value)
+            calculated_size = risk_amount / (stop_loss_pips * pip_value)
+            
+            # Apply limits
+            calculated_size = max(self.min_lot_size, calculated_size)
+            calculated_size = min(self.max_lot_size, calculated_size)
+            
+            # Round to symbol's volume step
+            volume_step = symbol_info.get('volume_step', 0.01)
+            calculated_size = round(calculated_size / volume_step) * volume_step
+            
+            self.logger.info(f"Calculated position size for {symbol}: {calculated_size:.2f}")
+            return calculated_size
+            
+        except Exception as e:
+            self.logger.error(f"Error calculating position size: {e}")
+            return self.min_lot_size
+    
+    def calculate_pip_value(self, symbol: str) -> float:
+        """Calculate pip value for the symbol"""
+        try:
+            symbol_info = self.mt5_connector.get_symbol_info(symbol)
+            if not symbol_info:
+                return 1.0
+            
+            # Get current tick
+            tick = self.mt5_connector.get_tick(symbol)
+            if not tick:
+                return 1.0
+            
+            point = symbol_info.get('point', 0.00001)
+            contract_size = symbol_info.get('trade_contract_size', 100000)
+            
+            # For most forex pairs
+            if 'JPY' in symbol:
+                pip_value = (0.01 / tick.get('ask', 1)) * contract_size
+            elif 'XAU' in symbol or 'GOLD' in symbol:
+                pip_value = 0.1 * contract_size / 100
+            else:
+                pip_value = (0.0001 / tick.get('ask', 1)) * contract_size
+            
+            return pip_value
+            
+        except Exception as e:
+            self.logger.error(f"Error calculating pip value for {symbol}: {e}")
+            return 1.0
+    
+    def get_recommended_lot_size(self, symbol: str, account_balance: float = None) -> float:
+        """Get recommended lot size based on account balance"""
+        try:
+            if account_balance is None:
+                account_info = self.mt5_connector.get_account_info()
+                account_balance = account_info.get('balance', 0) if account_info else 0
+            
+            # Conservative lot sizing
+            if account_balance < 1000:
+                return 0.01
+            elif account_balance < 5000:
+                return 0.02
+            elif account_balance < 10000:
+                return 0.05
+            elif account_balance < 50000:
+                return 0.1
+            else:
+                return min(account_balance / 100000, 1.0)  # 1% of balance as max
+                
+        except Exception as e:
+            self.logger.error(f"Error getting recommended lot size: {e}")
+            return 0.01

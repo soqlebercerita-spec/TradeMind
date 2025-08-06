@@ -469,3 +469,59 @@ class SwingStrategy:
             'max_positions': self.params['max_positions'],
             'current_trend': self.trend_direction
         }
+"""
+Swing Trading Strategy for AuraTrade Bot
+Medium-term trading strategy
+"""
+
+import pandas as pd
+import numpy as np
+from typing import Dict, List, Any, Optional
+from utils.logger import Logger
+
+class SwingStrategy:
+    """Swing trading strategy"""
+    
+    def __init__(self):
+        self.logger = Logger().get_logger()
+        self.name = "Swing"
+        self.timeframe = "H1"
+        
+        # Strategy parameters
+        self.max_spread = 5.0
+        self.tp_pips = 80
+        self.sl_pips = 40
+        
+        self.logger.info("Swing Strategy initialized")
+    
+    def analyze(self, symbol: str, rates: pd.DataFrame, tick: Dict) -> Optional[Dict]:
+        """Analyze swing opportunities"""
+        try:
+            if len(rates) < 50:
+                return None
+            
+            # Basic swing logic placeholder
+            return {
+                'action': 'buy',
+                'confidence': 0.6,
+                'tp_pips': self.tp_pips,
+                'sl_pips': self.sl_pips,
+                'volume': 0.01,
+                'reason': 'Swing analysis'
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Error in swing analysis: {e}")
+            return None
+    
+    def get_strategy_info(self) -> Dict[str, Any]:
+        """Get strategy information"""
+        return {
+            'name': self.name,
+            'timeframe': self.timeframe,
+            'tp_pips': self.tp_pips,
+            'sl_pips': self.sl_pips,
+            'max_spread': self.max_spread,
+            'risk_level': 'Medium',
+            'description': 'Swing trading strategy'
+        }

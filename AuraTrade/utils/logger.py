@@ -108,3 +108,73 @@ def log_system(message: str, level: str = "info"):
         logger.error(f"SYSTEM | {message}")
     else:
         logger.info(f"SYSTEM | {message}")
+"""
+Logger utility for AuraTrade Bot
+Centralized logging with different levels and file output
+"""
+
+import logging
+import os
+from datetime import datetime
+from typing import Optional
+
+class Logger:
+    """Centralized logger for AuraTrade Bot"""
+    
+    def __init__(self):
+        self.logger = None
+        self.setup_logger()
+    
+    def setup_logger(self):
+        """Setup logger with file and console handlers"""
+        # Create logs directory if it doesn't exist
+        os.makedirs("logs", exist_ok=True)
+        
+        # Create logger
+        self.logger = logging.getLogger("AuraTrade")
+        self.logger.setLevel(logging.INFO)
+        
+        # Clear existing handlers
+        if self.logger.handlers:
+            self.logger.handlers.clear()
+        
+        # Create formatters
+        formatter = logging.Formatter(
+            '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+            datefmt='%Y-%m-%d %H:%M:%S'
+        )
+        
+        # File handler
+        log_filename = f"logs/auratrade_{datetime.now().strftime('%Y%m%d')}.log"
+        file_handler = logging.FileHandler(log_filename, encoding='utf-8')
+        file_handler.setLevel(logging.INFO)
+        file_handler.setFormatter(formatter)
+        
+        # Console handler
+        console_handler = logging.StreamHandler()
+        console_handler.setLevel(logging.INFO)
+        console_handler.setFormatter(formatter)
+        
+        # Add handlers
+        self.logger.addHandler(file_handler)
+        self.logger.addHandler(console_handler)
+    
+    def get_logger(self):
+        """Get logger instance"""
+        return self.logger
+
+# Global logger functions
+def log_trade(action: str, symbol: str, volume: float, price: float):
+    """Log trade execution"""
+    logger = Logger().get_logger()
+    logger.info(f"TRADE: {action.upper()} {volume} {symbol} @ {price:.5f}")
+
+def log_error(message: str):
+    """Log error message"""
+    logger = Logger().get_logger()
+    logger.error(f"ERROR: {message}")
+
+def log_system(message: str):
+    """Log system message"""
+    logger = Logger().get_logger()
+    logger.info(f"SYSTEM: {message}")

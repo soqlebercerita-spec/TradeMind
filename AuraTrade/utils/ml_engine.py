@@ -417,3 +417,190 @@ class MLEngine:
         except Exception as e:
             self.logger.error(f"Error loading models: {e}")
             return False
+"""
+Machine Learning Engine for AuraTrade Bot
+Signal enhancement and market prediction
+"""
+
+import pandas as pd
+import numpy as np
+from typing import Dict, List, Any, Optional
+from utils.logger import Logger
+
+class MLEngine:
+    """Machine learning engine for signal enhancement"""
+    
+    def __init__(self):
+        self.logger = Logger().get_logger()
+        self.models = {}
+        self.enabled = False
+        
+        try:
+            # Try to import ML libraries
+            import sklearn
+            self.enabled = True
+            self.logger.info("ML Engine initialized successfully")
+        except ImportError:
+            self.logger.warning("ML libraries not available - ML engine disabled")
+    
+    def enhance_signals(self, signals: List[Dict], rates: pd.DataFrame, 
+                       indicators: Dict) -> List[Dict]:
+        """Enhance trading signals with ML predictions"""
+        if not self.enabled or not signals:
+            return signals
+        
+        try:
+            enhanced_signals = []
+            
+            for signal in signals:
+                # Apply basic signal filtering and enhancement
+                enhanced_signal = signal.copy()
+                
+                # Enhance confidence based on multiple factors
+                base_confidence = signal.get('confidence', 0.5)
+                
+                # Factor 1: Trend alignment
+                trend_factor = self._calculate_trend_factor(indicators)
+                
+                # Factor 2: Volume confirmation
+                volume_factor = self._calculate_volume_factor(rates)
+                
+                # Factor 3: Market conditions
+                market_factor = self._calculate_market_factor(rates)
+                
+                # Combined confidence
+                enhanced_confidence = base_confidence * trend_factor * volume_factor * market_factor
+                enhanced_confidence = min(1.0, max(0.0, enhanced_confidence))
+                
+                enhanced_signal['confidence'] = enhanced_confidence
+                enhanced_signal['ml_enhanced'] = True
+                
+                # Only keep signals with minimum confidence
+                if enhanced_confidence >= 0.6:
+                    enhanced_signals.append(enhanced_signal)
+            
+            return enhanced_signals
+            
+        except Exception as e:
+            self.logger.error(f"Error enhancing signals: {e}")
+            return signals
+    
+    def _calculate_trend_factor(self, indicators: Dict) -> float:
+        """Calculate trend alignment factor"""
+        try:
+            # Simple trend analysis based on moving averages
+            sma_20 = indicators.get('sma_20', 0)
+            sma_50 = indicators.get('sma_50', 0)
+            
+            if sma_20 > sma_50:
+                return 1.1  # Slight boost for uptrend
+            elif sma_20 < sma_50:
+                return 0.9  # Slight reduction for downtrend
+            else:
+                return 1.0  # Neutral
+                
+        except Exception:
+            return 1.0
+    
+    def _calculate_volume_factor(self, rates: pd.DataFrame) -> float:
+        """Calculate volume confirmation factor"""
+        try:
+            if 'tick_volume' not in rates.columns or len(rates) < 10:
+                return 1.0
+            
+            recent_volume = rates['tick_volume'].tail(5).mean()
+            avg_volume = rates['tick_volume'].tail(20).mean()
+            
+            if recent_volume > avg_volume * 1.2:
+                return 1.1  # High volume confirmation
+            elif recent_volume < avg_volume * 0.8:
+                return 0.9  # Low volume warning
+            else:
+                return 1.0
+                
+        except Exception:
+            return 1.0
+    
+    def _calculate_market_factor(self, rates: pd.DataFrame) -> float:
+        """Calculate market conditions factor"""
+        try:
+            if len(rates) < 20:
+                return 1.0
+            
+            # Calculate volatility
+            returns = rates['close'].pct_change().tail(20)
+            volatility = returns.std()
+            
+            # Normal volatility range
+            if 0.005 <= volatility <= 0.02:
+                return 1.0  # Good conditions
+            elif volatility > 0.02:
+                return 0.8  # High volatility - reduce confidence
+            else:
+                return 0.9  # Low volatility - slightly reduce
+                
+        except Exception:
+            return 1.0
+    
+    def predict_market_direction(self, rates: pd.DataFrame, 
+                               indicators: Dict) -> Dict[str, Any]:
+        """Predict market direction using simple heuristics"""
+        try:
+            if len(rates) < 50:
+                return {'direction': 'NEUTRAL', 'confidence': 0.5}
+            
+            # Simple trend analysis
+            close_prices = rates['close'].values
+            short_ma = np.mean(close_prices[-10:])
+            long_ma = np.mean(close_prices[-30:])
+            
+            if short_ma > long_ma * 1.001:
+                direction = 'UP'
+                confidence = min(0.8, (short_ma - long_ma) / long_ma * 100)
+            elif short_ma < long_ma * 0.999:
+                direction = 'DOWN'
+                confidence = min(0.8, (long_ma - short_ma) / long_ma * 100)
+            else:
+                direction = 'NEUTRAL'
+                confidence = 0.5
+            
+            return {
+                'direction': direction,
+                'confidence': confidence,
+                'short_ma': short_ma,
+                'long_ma': long_ma
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Error predicting market direction: {e}")
+            return {'direction': 'NEUTRAL', 'confidence': 0.5}
+    
+    def analyze_pattern(self, rates: pd.DataFrame) -> Dict[str, Any]:
+        """Analyze price patterns"""
+        try:
+            if len(rates) < 20:
+                return {'pattern': 'INSUFFICIENT_DATA', 'strength': 0.0}
+            
+            # Simple pattern detection
+            close_prices = rates['close'].values[-20:]
+            high_prices = rates['high'].values[-20:]
+            low_prices = rates['low'].values[-20:]
+            
+            # Check for breakout patterns
+            recent_high = np.max(high_prices[-5:])
+            previous_resistance = np.max(high_prices[-20:-5])
+            
+            if recent_high > previous_resistance * 1.001:
+                return {'pattern': 'BREAKOUT_UP', 'strength': 0.7}
+            
+            recent_low = np.min(low_prices[-5:])
+            previous_support = np.min(low_prices[-20:-5])
+            
+            if recent_low < previous_support * 0.999:
+                return {'pattern': 'BREAKOUT_DOWN', 'strength': 0.7}
+            
+            return {'pattern': 'CONSOLIDATION', 'strength': 0.5}
+            
+        except Exception as e:
+            self.logger.error(f"Error analyzing pattern: {e}")
+            return {'pattern': 'ERROR', 'strength': 0.0}

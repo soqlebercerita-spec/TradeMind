@@ -371,3 +371,127 @@ def create_notifier() -> TelegramNotifier:
     """Create notification system"""
     # Assuming the intention is to use TelegramNotifier by default as per the original file's focus
     return TelegramNotifier()
+"""
+Notification System for AuraTrade Bot
+Telegram notifications and system alerts
+"""
+
+import requests
+from datetime import datetime
+from typing import Optional, Dict, Any
+from utils.logger import Logger
+
+class TelegramNotifier:
+    """Telegram notification system"""
+    
+    def __init__(self, credentials: Dict[str, str]):
+        self.logger = Logger().get_logger()
+        self.bot_token = credentials.get('bot_token', '')
+        self.chat_id = credentials.get('chat_id', '')
+        self.enabled = credentials.get('enabled', False) and bool(self.bot_token and self.chat_id)
+        
+        if self.enabled:
+            self.logger.info("Telegram notifier enabled")
+        else:
+            self.logger.warning("Telegram notifier disabled - missing credentials")
+    
+    def send_message(self, message: str) -> bool:
+        """Send message to Telegram"""
+        if not self.enabled:
+            return False
+        
+        try:
+            url = f"https://api.telegram.org/bot{self.bot_token}/sendMessage"
+            data = {
+                'chat_id': self.chat_id,
+                'text': message,
+                'parse_mode': 'HTML'
+            }
+            
+            response = requests.post(url, data=data, timeout=10)
+            
+            if response.status_code == 200:
+                return True
+            else:
+                self.logger.error(f"Failed to send Telegram message: {response.status_code}")
+                return False
+                
+        except Exception as e:
+            self.logger.error(f"Error sending Telegram message: {e}")
+            return False
+    
+    def send_trade_signal(self, action: str, symbol: str, volume: float, 
+                         price: float, additional_info: str = "") -> bool:
+        """Send trading signal notification"""
+        emoji = "📈" if action.upper() == "BUY" else "📉"
+        
+        message = f"""
+🤖 <b>AuraTrade Signal</b>
+        
+{emoji} <b>{action.upper()}</b> {symbol}
+💰 Volume: {volume}
+💲 Price: {price:.5f}
+⏰ Time: {datetime.now().strftime('%H:%M:%S')}
+
+{additional_info}
+        """
+        
+        return self.send_message(message.strip())
+    
+    def send_system_status(self, status: str, details: str = "") -> bool:
+        """Send system status notification"""
+        emoji_map = {
+            'started': '🚀',
+            'stopped': '⛔',
+            'error': '❌',
+            'warning': '⚠️',
+            'info': 'ℹ️'
+        }
+        
+        emoji = emoji_map.get(status.lower(), 'ℹ️')
+        
+        message = f"""
+{emoji} <b>AuraTrade System</b>
+
+Status: <b>{status.upper()}</b>
+Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+
+{details}
+        """
+        
+        return self.send_message(message.strip())
+    
+    def send_trade_result(self, symbol: str, action: str, profit: float, 
+                         duration: str = "") -> bool:
+        """Send trade result notification"""
+        emoji = "✅" if profit > 0 else "❌"
+        profit_text = f"+${profit:.2f}" if profit > 0 else f"${profit:.2f}"
+        
+        message = f"""
+{emoji} <b>Trade Closed</b>
+
+Symbol: {symbol}
+Action: {action.upper()}
+Profit: <b>{profit_text}</b>
+Duration: {duration}
+Time: {datetime.now().strftime('%H:%M:%S')}
+        """
+        
+        return self.send_message(message.strip())
+    
+    def send_daily_report(self, stats: Dict[str, Any]) -> bool:
+        """Send daily trading report"""
+        message = f"""
+📊 <b>Daily Trading Report</b>
+📅 {datetime.now().strftime('%Y-%m-%d')}
+
+💰 Total Profit: ${stats.get('total_profit', 0):.2f}
+📈 Trades: {stats.get('total_trades', 0)}
+🎯 Win Rate: {stats.get('win_rate', 0):.1f}%
+📊 Best Trade: ${stats.get('best_trade', 0):.2f}
+📉 Worst Trade: ${stats.get('worst_trade', 0):.2f}
+
+🤖 AuraTrade Bot
+        """
+        
+        return self.send_message(message.strip())

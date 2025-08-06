@@ -134,6 +134,10 @@ class AuraTradeBot:
             
             # Initialize order manager
             self.logger.info("Initializing order manager...")
+            self.order_manager = OrderManager(self.mt5_connector)</old_str>
+</old_str>
+<new_str>            # Initialize order manager
+            self.logger.info("Initializing order manager...")
             self.order_manager = OrderManager(self.mt5_connector)
             
             # Initialize risk manager
@@ -170,6 +174,9 @@ class AuraTradeBot:
             # Initialize notifier
             self.logger.info("Initializing notifier...")
             self.notifier = TelegramNotifier(self.credentials.get_telegram_credentials())
+            
+            # Link components
+            self.order_manager.set_components(self.risk_manager, self.notifier)
             
             # Initialize strategies
             self._initialize_strategies()

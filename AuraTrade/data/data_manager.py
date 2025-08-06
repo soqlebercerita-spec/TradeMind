@@ -522,3 +522,193 @@ class DataManager:
             
         except Exception as e:
             log_error("DataManager", "Error cleaning up old data", e)
+"""
+Data Manager for AuraTrade Bot
+Real-time and historical data management
+"""
+
+import pandas as pd
+import numpy as np
+from datetime import datetime, timedelta
+from typing import Dict, List, Optional, Any
+from utils.logger import Logger
+
+class DataManager:
+    """Data management for real-time and historical data"""
+    
+    def __init__(self, mt5_connector):
+        self.logger = Logger().get_logger()
+        self.mt5_connector = mt5_connector
+        
+        # Data cache
+        self.rates_cache = {}
+        self.cache_duration = 60  # seconds
+        
+        # Timeframes
+        self.timeframes = {
+            'M1': 1,
+            'M5': 5,
+            'M15': 15,
+            'M30': 30,
+            'H1': 16385,
+            'H4': 16388,
+            'D1': 16408
+        }
+        
+        self.logger.info("Data Manager initialized")
+    
+    def get_rates(self, symbol: str, timeframe: str = 'M1', count: int = 100) -> Optional[pd.DataFrame]:
+        """Get historical rates with caching"""
+        try:
+            # Check cache
+            cache_key = f"{symbol}_{timeframe}_{count}"
+            if cache_key in self.rates_cache:
+                cached_data, cached_time = self.rates_cache[cache_key]
+                if (datetime.now() - cached_time).seconds < self.cache_duration:
+                    return cached_data
+            
+            # Get timeframe value
+            tf_value = self.timeframes.get(timeframe, 1)
+            
+            # Get rates from MT5
+            rates = self.mt5_connector.get_rates(symbol, tf_value, 0, count)
+            
+            if rates is not None and len(rates) > 0:
+                # Cache the data
+                self.rates_cache[cache_key] = (rates, datetime.now())
+                return rates
+            
+            return None
+            
+        except Exception as e:
+            self.logger.error(f"Error getting rates for {symbol}: {e}")
+            return None
+    
+    def get_current_tick(self, symbol: str) -> Optional[Dict]:
+        """Get current tick data"""
+        try:
+            return self.mt5_connector.get_tick(symbol)
+        except Exception as e:
+            self.logger.error(f"Error getting tick for {symbol}: {e}")
+            return None
+    
+    def get_market_data(self, symbol: str) -> Dict[str, Any]:
+        """Get comprehensive market data"""
+        try:
+            # Get current tick
+            tick = self.get_current_tick(symbol)
+            if not tick:
+                return {}
+            
+            # Get rates
+            rates = self.get_rates(symbol, 'M1', 100)
+            if rates is None or len(rates) == 0:
+                return {}
+            
+            # Get symbol info
+            symbol_info = self.mt5_connector.get_symbol_info(symbol)
+            
+            # Calculate basic statistics
+            latest_close = rates['close'].iloc[-1]
+            high_24h = rates['high'].tail(24).max() if len(rates) >= 24 else rates['high'].max()
+            low_24h = rates['low'].tail(24).min() if len(rates) >= 24 else rates['low'].min()
+            
+            # Calculate spread
+            spread = tick['ask'] - tick['bid']
+            point = symbol_info.get('point', 0.00001)
+            spread_pips = spread / point
+            
+            return {
+                'symbol': symbol,
+                'bid': tick['bid'],
+                'ask': tick['ask'],
+                'last': tick.get('last', tick['bid']),
+                'spread': spread,
+                'spread_pips': spread_pips,
+                'close': latest_close,
+                'high_24h': high_24h,
+                'low_24h': low_24h,
+                'change_24h': ((latest_close - rates['close'].iloc[-25]) / rates['close'].iloc[-25] * 100) if len(rates) >= 25 else 0,
+                'timestamp': datetime.now(),
+                'rates_count': len(rates)
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Error getting market data for {symbol}: {e}")
+            return {}
+    
+    def calculate_volatility(self, symbol: str, period: int = 20) -> float:
+        """Calculate price volatility"""
+        try:
+            rates = self.get_rates(symbol, 'M1', period + 10)
+            if rates is None or len(rates) < period:
+                return 0.0
+            
+            returns = rates['close'].pct_change().tail(period)
+            volatility = returns.std() * np.sqrt(period)  # Annualized
+            
+            return volatility
+            
+        except Exception as e:
+            self.logger.error(f"Error calculating volatility: {e}")
+            return 0.0
+    
+    def get_support_resistance(self, symbol: str, period: int = 50) -> Dict[str, List[float]]:
+        """Calculate support and resistance levels"""
+        try:
+            rates = self.get_rates(symbol, 'M1', period)
+            if rates is None or len(rates) < period:
+                return {'support': [], 'resistance': []}
+            
+            highs = rates['high'].values
+            lows = rates['low'].values
+            
+            # Simple support/resistance calculation
+            resistance_levels = []
+            support_levels = []
+            
+            # Find local maxima for resistance
+            for i in range(2, len(highs) - 2):
+                if highs[i] > highs[i-1] and highs[i] > highs[i-2] and \
+                   highs[i] > highs[i+1] and highs[i] > highs[i+2]:
+                    resistance_levels.append(highs[i])
+            
+            # Find local minima for support
+            for i in range(2, len(lows) - 2):
+                if lows[i] < lows[i-1] and lows[i] < lows[i-2] and \
+                   lows[i] < lows[i+1] and lows[i] < lows[i+2]:
+                    support_levels.append(lows[i])
+            
+            # Sort and take most significant levels
+            resistance_levels = sorted(set(resistance_levels), reverse=True)[:3]
+            support_levels = sorted(set(support_levels))[:3]
+            
+            return {
+                'resistance': resistance_levels,
+                'support': support_levels
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Error calculating support/resistance: {e}")
+            return {'support': [], 'resistance': []}
+    
+    def is_market_open(self, symbol: str = 'EURUSD') -> bool:
+        """Check if market is open"""
+        try:
+            return self.mt5_connector.is_market_open(symbol)
+        except Exception as e:
+            self.logger.error(f"Error checking market status: {e}")
+            return False
+    
+    def clear_cache(self):
+        """Clear data cache"""
+        self.rates_cache.clear()
+        self.logger.info("Data cache cleared")
+    
+    def get_cache_info(self) -> Dict[str, Any]:
+        """Get cache information"""
+        return {
+            'cached_items': len(self.rates_cache),
+            'cache_duration': self.cache_duration,
+            'cache_keys': list(self.rates_cache.keys())
+        }

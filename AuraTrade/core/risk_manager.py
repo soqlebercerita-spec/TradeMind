@@ -393,3 +393,153 @@ Risk Management Summary:
         except Exception as e:
             log_error("RiskManager", f"Error generating risk summary: {e}", e)
             return "Error generating risk summary"
+"""
+Risk Management System for AuraTrade Bot
+Comprehensive risk control and position management
+"""
+
+import pandas as pd
+from datetime import datetime, timedelta
+from typing import Dict, List, Optional, Any
+from utils.logger import Logger
+
+class RiskManager:
+    """Advanced risk management system"""
+    
+    def __init__(self, mt5_connector):
+        self.logger = Logger().get_logger()
+        self.mt5_connector = mt5_connector
+        
+        # Risk parameters
+        self.max_risk_per_trade = 1.0  # 1% per trade
+        self.max_daily_risk = 5.0      # 5% daily risk
+        self.max_drawdown = 10.0       # 10% max drawdown
+        self.max_positions = 10        # Max open positions
+        self.max_positions_per_symbol = 3  # Max per symbol
+        
+        # Tracking
+        self.daily_trades = 0
+        self.daily_loss = 0.0
+        self.start_balance = 0.0
+        
+        self.logger.info("Risk Manager initialized")
+    
+    def can_open_position(self, symbol: str, volume: float) -> bool:
+        """Check if position can be opened based on risk rules"""
+        try:
+            # Check account info
+            account_info = self.mt5_connector.get_account_info()
+            if not account_info:
+                return False
+            
+            balance = account_info.get('balance', 0)
+            equity = account_info.get('equity', 0)
+            margin_level = account_info.get('margin_level', 0)
+            
+            # Set initial balance if not set
+            if self.start_balance == 0:
+                self.start_balance = balance
+            
+            # Check margin level
+            if margin_level < 200:  # Minimum 200% margin level
+                self.logger.warning(f"Margin level too low: {margin_level}%")
+                return False
+            
+            # Check max drawdown
+            current_drawdown = (self.start_balance - equity) / self.start_balance * 100
+            if current_drawdown > self.max_drawdown:
+                self.logger.warning(f"Max drawdown exceeded: {current_drawdown:.2f}%")
+                return False
+            
+            # Check daily loss limit
+            daily_loss_pct = (self.daily_loss / balance) * 100 if balance > 0 else 0
+            if daily_loss_pct > self.max_daily_risk:
+                self.logger.warning(f"Daily risk limit exceeded: {daily_loss_pct:.2f}%")
+                return False
+            
+            # Check position limits
+            positions = self.mt5_connector.get_positions()
+            
+            # Total positions limit
+            if len(positions) >= self.max_positions:
+                self.logger.warning(f"Max positions reached: {len(positions)}")
+                return False
+            
+            # Per symbol limit
+            symbol_positions = [p for p in positions if p['symbol'] == symbol]
+            if len(symbol_positions) >= self.max_positions_per_symbol:
+                self.logger.warning(f"Max positions for {symbol} reached: {len(symbol_positions)}")
+                return False
+            
+            # Check position size vs account balance
+            position_value = self.calculate_position_value(symbol, volume)
+            risk_per_trade_amount = balance * (self.max_risk_per_trade / 100)
+            
+            if position_value > risk_per_trade_amount * 20:  # Max 20x risk amount as position size
+                self.logger.warning(f"Position size too large: {position_value}")
+                return False
+            
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"Error in risk check: {e}")
+            return False
+    
+    def calculate_position_value(self, symbol: str, volume: float) -> float:
+        """Calculate position value in USD"""
+        try:
+            tick = self.mt5_connector.get_tick(symbol)
+            if not tick:
+                return 0.0
+            
+            symbol_info = self.mt5_connector.get_symbol_info(symbol)
+            if not symbol_info:
+                return 0.0
+            
+            # Simplified calculation
+            contract_size = symbol_info.get('trade_contract_size', 100000)
+            price = tick.get('ask', 0)
+            
+            return volume * contract_size * price / 100000  # Normalize
+            
+        except Exception as e:
+            self.logger.error(f"Error calculating position value: {e}")
+            return 0.0
+    
+    def update_daily_stats(self, profit: float):
+        """Update daily statistics"""
+        if profit < 0:
+            self.daily_loss += abs(profit)
+        self.daily_trades += 1
+    
+    def reset_daily_stats(self):
+        """Reset daily statistics"""
+        self.daily_trades = 0
+        self.daily_loss = 0.0
+        self.logger.info("Daily risk statistics reset")
+    
+    def get_risk_metrics(self) -> Dict[str, Any]:
+        """Get current risk metrics"""
+        account_info = self.mt5_connector.get_account_info()
+        if not account_info:
+            return {}
+        
+        balance = account_info.get('balance', 0)
+        equity = account_info.get('equity', 0)
+        
+        current_drawdown = 0.0
+        if self.start_balance > 0:
+            current_drawdown = (self.start_balance - equity) / self.start_balance * 100
+        
+        daily_risk_used = (self.daily_loss / balance * 100) if balance > 0 else 0
+        
+        return {
+            'max_risk_per_trade': self.max_risk_per_trade,
+            'max_daily_risk': self.max_daily_risk,
+            'daily_risk_used': daily_risk_used,
+            'current_drawdown': current_drawdown,
+            'max_drawdown': self.max_drawdown,
+            'daily_trades': self.daily_trades,
+            'positions_count': len(self.mt5_connector.get_positions()),
+            'max_positions': self.max_positions
+        }

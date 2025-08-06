@@ -7,18 +7,16 @@ import time
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any, Tuple
 from core.mt5_connector import MT5Connector
-from core.risk_manager import RiskManager
 from utils.logger import Logger, log_trade, log_error
-from utils.notifier import TelegramNotifier
 
 class OrderManager:
     """Advanced order management with risk controls"""
 
-    def __init__(self, mt5_connector: MT5Connector, risk_manager: RiskManager, notifier: TelegramNotifier):
+    def __init__(self, mt5_connector):
         self.logger = Logger().get_logger()
         self.mt5_connector = mt5_connector
-        self.risk_manager = risk_manager
-        self.notifier = notifier
+        self.risk_manager = None
+        self.notifier = None
 
         # Order tracking
         self.active_orders = {}
@@ -31,6 +29,13 @@ class OrderManager:
         self.max_spread = 5    # pips
 
         self.logger.info("Order Manager initialized")
+    
+    def set_components(self, risk_manager=None, notifier=None):
+        """Set optional components"""
+        if risk_manager:
+            self.risk_manager = risk_manager
+        if notifier:
+            self.notifier = notifier
 
     def place_market_order(self, symbol: str, action: str, volume: float, 
                           sl_pips: float = None, tp_pips: float = None, 

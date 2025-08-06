@@ -264,3 +264,124 @@ AuraTrade Bot Settings Summary:
 💱 Symbols: {', '.join(self.get_enabled_symbols())}
         """
         return summary.strip()
+"""
+Settings Manager for AuraTrade Bot
+Runtime settings and preferences
+"""
+
+import json
+import os
+from typing import Dict, Any, Optional
+from utils.logger import Logger
+
+class Settings:
+    """Runtime settings manager"""
+    
+    def __init__(self):
+        self.logger = Logger().get_logger()
+        self.settings_file = "settings.json"
+        self.settings = self._load_settings()
+        self.logger.info("Settings loaded")
+    
+    def _load_settings(self) -> Dict[str, Any]:
+        """Load settings from file"""
+        default_settings = {
+            'gui': {
+                'theme': 'dark',
+                'window_width': 1400,
+                'window_height': 900,
+                'auto_update_interval': 1000
+            },
+            'trading': {
+                'auto_start': False,
+                'default_strategy': 'scalping',
+                'default_symbol': 'EURUSD',
+                'default_lot_size': 0.01
+            },
+            'notifications': {
+                'telegram_enabled': False,
+                'sound_enabled': True,
+                'trade_notifications': True,
+                'system_notifications': True
+            },
+            'advanced': {
+                'debug_mode': False,
+                'log_trades': True,
+                'backup_enabled': True,
+                'auto_save_interval': 300
+            }
+        }
+        
+        if os.path.exists(self.settings_file):
+            try:
+                with open(self.settings_file, 'r') as f:
+                    loaded_settings = json.load(f)
+                    # Merge with defaults
+                    self._merge_settings(default_settings, loaded_settings)
+                    return default_settings
+            except Exception as e:
+                self.logger.error(f"Error loading settings: {e}")
+        
+        return default_settings
+    
+    def _merge_settings(self, default: Dict, loaded: Dict):
+        """Recursively merge loaded settings with defaults"""
+        for key, value in loaded.items():
+            if key in default:
+                if isinstance(value, dict) and isinstance(default[key], dict):
+                    self._merge_settings(default[key], value)
+                else:
+                    default[key] = value
+    
+    def get(self, key: str, default=None):
+        """Get setting value"""
+        keys = key.split('.')
+        value = self.settings
+        
+        try:
+            for k in keys:
+                value = value[k]
+            return value
+        except (KeyError, TypeError):
+            return default
+    
+    def set(self, key: str, value: Any):
+        """Set setting value"""
+        keys = key.split('.')
+        settings = self.settings
+        
+        for k in keys[:-1]:
+            if k not in settings:
+                settings[k] = {}
+            settings = settings[k]
+        
+        settings[keys[-1]] = value
+        self.save()
+    
+    def save(self):
+        """Save settings to file"""
+        try:
+            with open(self.settings_file, 'w') as f:
+                json.dump(self.settings, f, indent=4)
+        except Exception as e:
+            self.logger.error(f"Error saving settings: {e}")
+    
+    def reset_to_defaults(self):
+        """Reset settings to defaults"""
+        if os.path.exists(self.settings_file):
+            os.remove(self.settings_file)
+        self.settings = self._load_settings()
+        self.save()
+        self.logger.info("Settings reset to defaults")
+    
+    def get_gui_settings(self) -> Dict[str, Any]:
+        """Get GUI settings"""
+        return self.settings.get('gui', {})
+    
+    def get_trading_settings(self) -> Dict[str, Any]:
+        """Get trading settings"""
+        return self.settings.get('trading', {})
+    
+    def get_notification_settings(self) -> Dict[str, Any]:
+        """Get notification settings"""
+        return self.settings.get('notifications', {})

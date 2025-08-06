@@ -784,3 +784,216 @@ class PatternStrategy:
                 'Double Top/Bottom', 'Flag', 'Wedge'
             ]
         }
+"""
+Pattern Recognition Strategy for AuraTrade Bot
+Trading based on candlestick and chart patterns
+"""
+
+import pandas as pd
+import numpy as np
+from typing import Dict, List, Any, Optional
+from datetime import datetime
+from utils.logger import Logger
+
+class PatternStrategy:
+    """Pattern-based trading strategy"""
+    
+    def __init__(self):
+        self.logger = Logger().get_logger()
+        self.name = "Pattern"
+        self.timeframe = "M5"
+        
+        # Strategy parameters
+        self.max_spread = 4.0
+        self.tp_pips = 25
+        self.sl_pips = 15
+        
+        self.logger.info("Pattern Strategy initialized")
+    
+    def analyze(self, symbol: str, rates: pd.DataFrame, tick: Dict) -> Optional[Dict]:
+        """Analyze patterns"""
+        try:
+            if len(rates) < 30:
+                return None
+            
+            # Check spread
+            spread = self._calculate_spread(tick, symbol)
+            if spread > self.max_spread:
+                return None
+            
+            # Look for patterns
+            patterns = self._detect_patterns(rates)
+            
+            if patterns:
+                return patterns[0]  # Return strongest pattern
+            
+            return None
+            
+        except Exception as e:
+            self.logger.error(f"Error in pattern analysis: {e}")
+            return None
+    
+    def _calculate_spread(self, tick: Dict, symbol: str) -> float:
+        """Calculate spread in pips"""
+        try:
+            spread = tick['ask'] - tick['bid']
+            if 'JPY' in symbol:
+                return spread * 100
+            else:
+                return spread * 10000
+        except:
+            return 999
+    
+    def _detect_patterns(self, rates: pd.DataFrame) -> List[Dict]:
+        """Detect various patterns"""
+        patterns = []
+        
+        # Hammer pattern
+        hammer = self._detect_hammer(rates)
+        if hammer:
+            patterns.append(hammer)
+        
+        # Engulfing pattern
+        engulfing = self._detect_engulfing(rates)
+        if engulfing:
+            patterns.append(engulfing)
+        
+        # Breakout pattern
+        breakout = self._detect_breakout(rates)
+        if breakout:
+            patterns.append(breakout)
+        
+        # Sort by confidence
+        patterns.sort(key=lambda x: x.get('confidence', 0), reverse=True)
+        
+        return patterns
+    
+    def _detect_hammer(self, rates: pd.DataFrame) -> Optional[Dict]:
+        """Detect hammer candlestick pattern"""
+        try:
+            if len(rates) < 3:
+                return None
+            
+            last = rates.iloc[-1]
+            prev = rates.iloc[-2]
+            
+            # Hammer criteria
+            body = abs(last['close'] - last['open'])
+            upper_shadow = last['high'] - max(last['close'], last['open'])
+            lower_shadow = min(last['close'], last['open']) - last['low']
+            
+            # Hammer: small body, long lower shadow, small upper shadow
+            if (lower_shadow > body * 2 and 
+                upper_shadow < body * 0.5 and 
+                last['close'] > last['open'] and  # Bullish hammer
+                prev['close'] < prev['open']):    # Previous bearish
+                
+                return {
+                    'action': 'buy',
+                    'confidence': 0.75,
+                    'tp_pips': self.tp_pips,
+                    'sl_pips': self.sl_pips,
+                    'volume': 0.01,
+                    'reason': 'Bullish Hammer Pattern'
+                }
+            
+            return None
+            
+        except Exception:
+            return None
+    
+    def _detect_engulfing(self, rates: pd.DataFrame) -> Optional[Dict]:
+        """Detect engulfing pattern"""
+        try:
+            if len(rates) < 2:
+                return None
+            
+            current = rates.iloc[-1]
+            previous = rates.iloc[-2]
+            
+            # Bullish engulfing
+            if (previous['close'] < previous['open'] and  # Previous bearish
+                current['close'] > current['open'] and   # Current bullish
+                current['open'] < previous['close'] and  # Opens below prev close
+                current['close'] > previous['open']):    # Closes above prev open
+                
+                return {
+                    'action': 'buy',
+                    'confidence': 0.8,
+                    'tp_pips': self.tp_pips,
+                    'sl_pips': self.sl_pips,
+                    'volume': 0.01,
+                    'reason': 'Bullish Engulfing Pattern'
+                }
+            
+            # Bearish engulfing
+            elif (previous['close'] > previous['open'] and  # Previous bullish
+                  current['close'] < current['open'] and   # Current bearish
+                  current['open'] > previous['close'] and  # Opens above prev close
+                  current['close'] < previous['open']):    # Closes below prev open
+                
+                return {
+                    'action': 'sell',
+                    'confidence': 0.8,
+                    'tp_pips': self.tp_pips,
+                    'sl_pips': self.sl_pips,
+                    'volume': 0.01,
+                    'reason': 'Bearish Engulfing Pattern'
+                }
+            
+            return None
+            
+        except Exception:
+            return None
+    
+    def _detect_breakout(self, rates: pd.DataFrame) -> Optional[Dict]:
+        """Detect breakout patterns"""
+        try:
+            if len(rates) < 20:
+                return None
+            
+            recent = rates.tail(20)
+            current_price = rates['close'].iloc[-1]
+            
+            # Find resistance and support
+            resistance = recent['high'].max()
+            support = recent['low'].min()
+            
+            # Breakout above resistance
+            if current_price > resistance * 1.0005:  # 0.05% above
+                return {
+                    'action': 'buy',
+                    'confidence': 0.7,
+                    'tp_pips': self.tp_pips,
+                    'sl_pips': self.sl_pips,
+                    'volume': 0.01,
+                    'reason': f'Breakout above resistance at {resistance:.5f}'
+                }
+            
+            # Breakdown below support
+            elif current_price < support * 0.9995:  # 0.05% below
+                return {
+                    'action': 'sell',
+                    'confidence': 0.7,
+                    'tp_pips': self.tp_pips,
+                    'sl_pips': self.sl_pips,
+                    'volume': 0.01,
+                    'reason': f'Breakdown below support at {support:.5f}'
+                }
+            
+            return None
+            
+        except Exception:
+            return None
+    
+    def get_strategy_info(self) -> Dict[str, Any]:
+        """Get strategy information"""
+        return {
+            'name': self.name,
+            'timeframe': self.timeframe,
+            'tp_pips': self.tp_pips,
+            'sl_pips': self.sl_pips,
+            'max_spread': self.max_spread,
+            'risk_level': 'Medium',
+            'description': 'Pattern recognition with candlestick and chart patterns'
+        }

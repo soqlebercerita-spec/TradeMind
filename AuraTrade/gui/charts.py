@@ -475,3 +475,88 @@ def create_standalone_chart(data: pd.DataFrame, symbol: str = "EURUSD", indicato
         
     except Exception as e:
         print(f"Error creating standalone chart: {e}")
+"""
+Charts Module for AuraTrade Bot
+Price charts and technical analysis visualization
+"""
+
+from PyQt5.QtWidgets import *
+from PyQt5.QtCore import *
+from PyQt5.QtGui import *
+import pandas as pd
+from typing import Dict, List, Any
+
+class PriceChart(QWidget):
+    """Price chart widget"""
+    
+    def __init__(self):
+        super().__init__()
+        self.init_ui()
+    
+    def init_ui(self):
+        """Initialize chart UI"""
+        layout = QVBoxLayout(self)
+        
+        # Chart placeholder
+        self.chart_label = QLabel("Price Chart")
+        self.chart_label.setAlignment(Qt.AlignCenter)
+        self.chart_label.setStyleSheet("""
+            QLabel {
+                border: 2px solid #555555;
+                border-radius: 8px;
+                background-color: #1e1e1e;
+                color: #ffffff;
+                font-size: 16px;
+                min-height: 300px;
+            }
+        """)
+        
+        layout.addWidget(self.chart_label)
+    
+    def update_chart(self, rates: pd.DataFrame):
+        """Update chart with new data"""
+        if rates is not None and len(rates) > 0:
+            last_price = rates['close'].iloc[-1]
+            self.chart_label.setText(f"Last Price: {last_price:.5f}")
+
+class TechnicalIndicators(QWidget):
+    """Technical indicators display"""
+    
+    def __init__(self):
+        super().__init__()
+        self.init_ui()
+    
+    def init_ui(self):
+        """Initialize indicators UI"""
+        layout = QVBoxLayout(self)
+        
+        # Indicators group
+        indicators_group = QGroupBox("Technical Indicators")
+        indicators_layout = QGridLayout(indicators_group)
+        
+        self.rsi_label = QLabel("RSI: --")
+        self.macd_label = QLabel("MACD: --")
+        self.ma_label = QLabel("MA: --")
+        self.bb_label = QLabel("BB: --")
+        
+        indicators_layout.addWidget(self.rsi_label, 0, 0)
+        indicators_layout.addWidget(self.macd_label, 0, 1)
+        indicators_layout.addWidget(self.ma_label, 1, 0)
+        indicators_layout.addWidget(self.bb_label, 1, 1)
+        
+        layout.addWidget(indicators_group)
+    
+    def update_indicators(self, indicators: Dict[str, float]):
+        """Update indicators display"""
+        try:
+            rsi = indicators.get('rsi', 0)
+            macd = indicators.get('macd_line', 0)
+            sma_20 = indicators.get('sma_20', 0)
+            bb_upper = indicators.get('bb_upper', 0)
+            
+            self.rsi_label.setText(f"RSI: {rsi:.1f}")
+            self.macd_label.setText(f"MACD: {macd:.5f}")
+            self.ma_label.setText(f"SMA(20): {sma_20:.5f}")
+            self.bb_label.setText(f"BB Upper: {bb_upper:.5f}")
+        except Exception:
+            pass

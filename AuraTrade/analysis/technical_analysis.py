@@ -11,6 +11,239 @@ from datetime import datetime, timedelta
 from utils.logger import Logger
 
 class TechnicalAnalysis:
+    """Technical analysis with multiple indicators"""
+    
+    def __init__(self):
+        self.logger = Logger().get_logger()
+        self.logger.info("Technical Analysis initialized")
+    
+    def analyze_trends(self, rates: pd.DataFrame) -> Dict[str, Any]:
+        """Analyze market trends using multiple indicators"""
+        try:
+            if len(rates) < 50:
+                return {}
+            
+            indicators = self.calculate_all_indicators(rates)
+            
+            # Determine overall trend
+            trend = self._determine_trend(rates, indicators)
+            
+            return {
+                'trend': trend,
+                'rsi': indicators.get('rsi', 50),
+                'macd': indicators.get('macd_line', 0),
+                'bollinger_position': self._get_bollinger_position(rates, indicators),
+                'volume_trend': self._analyze_volume_trend(rates),
+                'support_resistance': self._find_support_resistance(rates)
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Error in trend analysis: {e}")
+            return {}
+    
+    def calculate_all_indicators(self, rates: pd.DataFrame) -> Dict[str, float]:
+        """Calculate all technical indicators"""
+        try:
+            close = rates['close']
+            high = rates['high']
+            low = rates['low']
+            volume = rates.get('tick_volume', pd.Series([1] * len(rates)))
+            
+            indicators = {}
+            
+            # Moving Averages
+            indicators['sma_20'] = close.rolling(20).mean().iloc[-1]
+            indicators['sma_50'] = close.rolling(50).mean().iloc[-1]
+            indicators['ema_12'] = close.ewm(span=12).mean().iloc[-1]
+            indicators['ema_26'] = close.ewm(span=26).mean().iloc[-1]
+            
+            # RSI
+            indicators['rsi'] = self._calculate_rsi(close).iloc[-1]
+            
+            # MACD
+            macd_line, signal_line, histogram = self._calculate_macd(close)
+            indicators['macd_line'] = macd_line.iloc[-1]
+            indicators['macd_signal'] = signal_line.iloc[-1]
+            indicators['macd_histogram'] = histogram.iloc[-1]
+            
+            # Bollinger Bands
+            bb_upper, bb_middle, bb_lower = self._calculate_bollinger_bands(close)
+            indicators['bb_upper'] = bb_upper.iloc[-1]
+            indicators['bb_middle'] = bb_middle.iloc[-1]
+            indicators['bb_lower'] = bb_lower.iloc[-1]
+            
+            # Stochastic
+            stoch_k, stoch_d = self._calculate_stochastic(high, low, close)
+            indicators['stoch_k'] = stoch_k.iloc[-1]
+            indicators['stoch_d'] = stoch_d.iloc[-1]
+            
+            # Williams %R
+            indicators['williams_r'] = self._calculate_williams_r(high, low, close).iloc[-1]
+            
+            # Average True Range (ATR)
+            indicators['atr'] = self._calculate_atr(high, low, close).iloc[-1]
+            
+            return indicators
+            
+        except Exception as e:
+            self.logger.error(f"Error calculating indicators: {e}")
+            return {}
+    
+    def _calculate_rsi(self, prices: pd.Series, period: int = 14) -> pd.Series:
+        """Calculate RSI"""
+        delta = prices.diff()
+        gain = delta.where(delta > 0, 0).rolling(window=period).mean()
+        loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
+        rs = gain / loss
+        rsi = 100 - (100 / (1 + rs))
+        return rsi
+    
+    def _calculate_macd(self, prices: pd.Series, fast: int = 12, slow: int = 26, signal: int = 9) -> Tuple[pd.Series, pd.Series, pd.Series]:
+        """Calculate MACD"""
+        ema_fast = prices.ewm(span=fast).mean()
+        ema_slow = prices.ewm(span=slow).mean()
+        macd_line = ema_fast - ema_slow
+        signal_line = macd_line.ewm(span=signal).mean()
+        histogram = macd_line - signal_line
+        return macd_line, signal_line, histogram
+    
+    def _calculate_bollinger_bands(self, prices: pd.Series, period: int = 20, std_dev: float = 2) -> Tuple[pd.Series, pd.Series, pd.Series]:
+        """Calculate Bollinger Bands"""
+        middle = prices.rolling(window=period).mean()
+        std = prices.rolling(window=period).std()
+        upper = middle + (std * std_dev)
+        lower = middle - (std * std_dev)
+        return upper, middle, lower
+    
+    def _calculate_stochastic(self, high: pd.Series, low: pd.Series, close: pd.Series, period: int = 14) -> Tuple[pd.Series, pd.Series]:
+        """Calculate Stochastic Oscillator"""
+        lowest_low = low.rolling(window=period).min()
+        highest_high = high.rolling(window=period).max()
+        k_percent = 100 * (close - lowest_low) / (highest_high - lowest_low)
+        d_percent = k_percent.rolling(window=3).mean()
+        return k_percent, d_percent
+    
+    def _calculate_williams_r(self, high: pd.Series, low: pd.Series, close: pd.Series, period: int = 14) -> pd.Series:
+        """Calculate Williams %R"""
+        highest_high = high.rolling(window=period).max()
+        lowest_low = low.rolling(window=period).min()
+        williams_r = -100 * (highest_high - close) / (highest_high - lowest_low)
+        return williams_r
+    
+    def _calculate_atr(self, high: pd.Series, low: pd.Series, close: pd.Series, period: int = 14) -> pd.Series:
+        """Calculate Average True Range"""
+        hl = high - low
+        hc = np.abs(high - close.shift())
+        lc = np.abs(low - close.shift())
+        tr = pd.DataFrame({'hl': hl, 'hc': hc, 'lc': lc}).max(axis=1)
+        atr = tr.rolling(window=period).mean()
+        return atr
+    
+    def _determine_trend(self, rates: pd.DataFrame, indicators: Dict) -> str:
+        """Determine overall market trend"""
+        try:
+            close = rates['close'].iloc[-1]
+            sma_20 = indicators.get('sma_20', close)
+            sma_50 = indicators.get('sma_50', close)
+            rsi = indicators.get('rsi', 50)
+            macd = indicators.get('macd_histogram', 0)
+            
+            bullish_signals = 0
+            bearish_signals = 0
+            
+            # Price vs Moving Averages
+            if close > sma_20:
+                bullish_signals += 1
+            else:
+                bearish_signals += 1
+            
+            if sma_20 > sma_50:
+                bullish_signals += 1
+            else:
+                bearish_signals += 1
+            
+            # RSI
+            if rsi > 50:
+                bullish_signals += 1
+            else:
+                bearish_signals += 1
+            
+            # MACD
+            if macd > 0:
+                bullish_signals += 1
+            else:
+                bearish_signals += 1
+            
+            if bullish_signals > bearish_signals:
+                return 'BULLISH'
+            elif bearish_signals > bullish_signals:
+                return 'BEARISH'
+            else:
+                return 'NEUTRAL'
+                
+        except Exception:
+            return 'NEUTRAL'
+    
+    def _get_bollinger_position(self, rates: pd.DataFrame, indicators: Dict) -> str:
+        """Get Bollinger Bands position"""
+        try:
+            close = rates['close'].iloc[-1]
+            bb_upper = indicators.get('bb_upper', close)
+            bb_lower = indicators.get('bb_lower', close)
+            bb_middle = indicators.get('bb_middle', close)
+            
+            if close >= bb_upper:
+                return 'UPPER'
+            elif close <= bb_lower:
+                return 'LOWER'
+            elif close > bb_middle:
+                return 'MIDDLE_HIGH'
+            else:
+                return 'MIDDLE_LOW'
+                
+        except Exception:
+            return 'MIDDLE'
+    
+    def _analyze_volume_trend(self, rates: pd.DataFrame) -> str:
+        """Analyze volume trend"""
+        try:
+            if 'tick_volume' not in rates.columns:
+                return 'NORMAL'
+            
+            volume = rates['tick_volume']
+            recent_avg = volume.tail(10).mean()
+            overall_avg = volume.tail(50).mean()
+            
+            if recent_avg > overall_avg * 1.2:
+                return 'HIGH'
+            elif recent_avg < overall_avg * 0.8:
+                return 'LOW'
+            else:
+                return 'NORMAL'
+                
+        except Exception:
+            return 'NORMAL'
+    
+    def _find_support_resistance(self, rates: pd.DataFrame, period: int = 20) -> Dict:
+        """Find support and resistance levels"""
+        try:
+            high = rates['high']
+            low = rates['low']
+            
+            # Recent highs and lows
+            recent_high = high.tail(period).max()
+            recent_low = low.tail(period).min()
+            
+            return {
+                'resistance': recent_high,
+                'support': recent_low,
+                'range': recent_high - recent_low
+            }
+            
+        except Exception:
+            return {'resistance': 0, 'support': 0, 'range': 0}
+
+class TechnicalAnalysis:
     """Advanced technical analysis with multiple indicators"""
     
     def __init__(self):
